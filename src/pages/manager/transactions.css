@@ -1,0 +1,186 @@
+/* Manager Transactions */
+
+.manager-transactions-table-section {
+  margin-top: 24px;
+}
+
+.manager-transactions-table-section .manager-section-title {
+  margin: 0 0 16px 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.manager-date-time {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 20px;
+  font-size: 14px;
+  color: #666;
+}
+
+.manager-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 24px;
+}
+
+.manager-stats-row .stat-card {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Dark theme - Manager Transactions */
+.dark-theme .manager-date-time {
+  color: var(--text-secondary);
+}
+
+.dark-theme .payments-header .header-right .manager-date-time,
+.dark-theme .payments-header .manager-date-time {
+  color: var(--text-secondary);
+}
+
+.dark-theme .payments-header .header-right .manager-date-time span,
+.dark-theme .payments-header .manager-date-time span {
+  color: var(--text-secondary);
+}
+
+.dark-theme .payments-content {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.dark-theme .manager-transactions-table-section .manager-section-title,
+.dark-theme .manager-section-title {
+  color: var(--text-primary);
+}
+
+/* Action bar: search and filter */
+.dark-theme .payments-content .search-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.dark-theme .payments-content .search-input {
+  background: #1a1a1a;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.dark-theme .payments-content .search-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.dark-theme .payments-content .search-icon {
+  color: var(--text-secondary);
+}
+
+.dark-theme .payments-content .filter-box .status-filter,
+.dark-theme .payments-content .status-filter {
+  background: #1a1a1a;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.dark-theme .payments-content .filter-box .status-filter:focus,
+.dark-theme .payments-content .status-filter:focus {
+  border-color: #f4a261;
+  background: #2d2d2d;
+}
+
+.dark-theme .payments-content .filter-box select option,
+.dark-theme .payments-content .status-filter option {
+  background: #2d2d2d;
+  color: var(--text-primary);
+}
+
+/* Stat cards (Pending, Approved, Rejected) */
+.dark-theme .manager-stats-row .stat-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+}
+
+.dark-theme .manager-stats-row .stat-card:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  background: var(--bg-secondary);
+}
+
+.dark-theme .manager-stats-row .stat-card .stat-info h3 {
+  color: var(--text-secondary);
+}
+
+.dark-theme .manager-stats-row .stat-card .stat-value {
+  color: var(--text-primary);
+}
+
+/* Table content: customer info, part info, amounts */
+.dark-theme .payments-content .info-name,
+.dark-theme .payments-table .info-name {
+  color: var(--text-primary);
+}
+
+.dark-theme .payments-content .info-detail,
+.dark-theme .payments-table .info-detail {
+  color: var(--text-secondary);
+}
+
+.dark-theme .payments-content .customer-info,
+.dark-theme .payments-content .part-info,
+.dark-theme .payments-table .customer-info,
+.dark-theme .payments-table .part-info {
+  color: var(--text-primary);
+}
+
+.dark-theme .payments-content .amount-cell,
+.dark-theme .payments-table .amount-cell {
+  color: var(--text-primary);
+}
+
+.dark-theme .payments-content .payment-method-badge,
+.dark-theme .payments-table .payment-method-badge {
+  background: #3a3a3a;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.dark-theme .payments-content .no-data,
+.dark-theme .payments-table .no-data {
+  color: var(--text-secondary);
+}
+
+/* Action buttons in table */
+.dark-theme .payments-content .action-btn.view {
+  background: #17a2b8;
+  color: white;
+  border: none;
+}
+
+.dark-theme .payments-content .action-btn.approve {
+  background: #28a745;
+  color: white;
+  border: none;
+}
+
+.dark-theme .payments-content .action-btn.reject {
+  background: #dc3545;
+  color: white;
+  border: none;
+}
+
+.dark-theme .payments-content .action-btn:hover {
+  opacity: 0.9;
+}
+
+@media (max-width: 900px) {
+  .manager-stats-row {
+    grid-template-columns: 1fr;
+  }
+}
