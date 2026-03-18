@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import React, { useCallback, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { getTheme, applyTheme } from './utils/theme';
 import { getSectionFromPath } from './utils/settingsSection';
+import useAutoLogout from './utils/useAutoLogout';
 import './App.css';
 import Home from './pages/Home';
 import Login from './pages/login';
@@ -52,10 +53,45 @@ function ThemeApplicator() {
   return null;
 }
 
+function AutoLogoutWatcher() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const isOnProtectedSection = () => {
+    const path = location.pathname || '';
+    const protectedPrefixes = [
+      '/sales',
+      '/finance/cashier',
+      '/finance/accountant',
+      '/manager',
+      '/admin',
+    ];
+    return protectedPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+  };
+
+  const onLogout = useCallback(() => {
+    localStorage.removeItem('user');
+    sessionStorage.removeItem('user');
+    navigate('/login');
+  }, [navigate]);
+
+  const enabled = (localStorage.getItem('user') || sessionStorage.getItem('user')) && isOnProtectedSection();
+
+  useAutoLogout({
+    enabled: Boolean(enabled),
+    inactivityMs: 5 * 60 * 1000,
+    warningMs: 30 * 1000,
+    onLogout,
+  });
+
+  return null;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <ThemeApplicator />
+      <AutoLogoutWatcher />
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<Home />} />

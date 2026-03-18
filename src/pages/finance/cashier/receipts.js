@@ -236,8 +236,11 @@ function CashierReceipts() {
   };
 
   const getTotalAmount = (receipt) => {
+    // Base total from items
+    let baseTotal = 0;
+
     if (receipt.items && receipt.items.length > 0) {
-      return receipt.items.reduce((sum, item) => {
+      baseTotal = receipt.items.reduce((sum, item) => {
         const qty = Number(item.quantity) || 0;
         const unit = Number(item.unit_price) || 0;
         const itemTotal =
@@ -246,10 +249,15 @@ function CashierReceipts() {
             : qty * unit;
         return sum + itemTotal;
       }, 0);
+    } else {
+      const qty = Number(receipt.quantity) || 0;
+      const unit = Number(receipt.unit_price) || 0;
+      baseTotal = qty * unit;
     }
-    const qty = Number(receipt.quantity) || 0;
-    const unit = Number(receipt.unit_price) || 0;
-    return qty * unit;
+
+    // Payable total must consider discount_amount
+    const discount = Number(receipt.discount_amount) || 0;
+    return Math.max(0, baseTotal - discount);
   };
 
   const formatDateTime = (dateString) => {
@@ -1076,6 +1084,12 @@ function CashierReceipts() {
                   <label>{t.totalAmount}</label>
                   <div className="view-value" style={{ fontWeight: 'bold', fontSize: '1.1em' }}>
                     TZS {formatPrice(getTotalAmount(selectedPayment))}
+                  </div>
+                </div>
+                <div className="view-item">
+                  <label>{t.discount || 'Discount'}</label>
+                  <div className="view-value" style={{ fontWeight: 600 }}>
+                    TZS {formatPrice(Number(selectedPayment.discount_amount) || 0)}
                   </div>
                 </div>
                 <div className="view-item">
