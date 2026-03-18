@@ -33,10 +33,12 @@ function SalesReports() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [timePeriod, setTimePeriod] = useState('today'); // 'today', 'weekly', 'monthly'
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [payments, setPayments] = useState([]);
   const [currentDateTime, setCurrentDateTime] = useState(getCurrentDateTime());
   const [notificationCount, setNotificationCount] = useState(0);
+  const [logoDataUrl, setLogoDataUrl] = useState(null);
 
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -96,6 +98,22 @@ function SalesReports() {
     };
   }, [navigate]);
 
+  useEffect(() => {
+    const logoSrc = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    if (!logoSrc) return;
+    const src = logoSrc.startsWith('http')
+      ? logoSrc
+      : window.location.origin + (logoSrc.startsWith('/') ? logoSrc : '/' + logoSrc);
+    fetch(src)
+      .then((r) => r.blob())
+      .then((blob) => {
+        const reader = new FileReader();
+        reader.onloadend = () => setLogoDataUrl(reader.result);
+        reader.readAsDataURL(blob);
+      })
+      .catch(() => {});
+  }, []);
+
   if (loading) {
     return (
       <div
@@ -132,7 +150,20 @@ function SalesReports() {
     );
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: t.logout || 'Logout',
+      text: t.areYouSureLogout || 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: t.yesLogout || 'Yes, logout',
+      cancelButtonText: t.cancel || 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -163,240 +194,219 @@ function SalesReports() {
   };
 
   const handlePrintReports = () => {
-    const periodLabel = timePeriod === 'today' ? t.today : timePeriod === 'weekly' ? t.weekly : t.monthly;
-    const currentDate = new Date().toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
+    const reportWindow = window.open('', '_blank', 'width=1000,height=700');
+    if (!reportWindow) return;
 
-    // Build printable HTML document
-    const printContent = `
+    const logoPath = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    const logoUrl = logoPath
+      ? (logoPath.startsWith('http') ? logoPath : window.location.origin + (logoPath.startsWith('/') ? logoPath : '/' + logoPath))
+      : window.location.origin + '/logo192.png';
+    const logoSrcForPrint = logoDataUrl || logoUrl;
+
+    const dateRangeLabel =
+      dateFrom && dateTo
+        ? `${dateFrom} to ${dateTo}`
+        : dateFrom
+        ? `From ${dateFrom}`
+        : dateTo
+        ? `Until ${dateTo}`
+        : 'All time';
+
+    const tableHeader = `
+            <thead>
+              <tr>
+                <th class="tc">S.No</th>
+                <th class="tl">${t.date}</th>
+                <th class="tl">${t.customer}</th>
+                <th class="tl">${t.sparePart}</th>
+                <th class="tc">${t.status}</th>
+                <th class="tr">${t.totalAmount} (TZS)</th>
+              </tr>
+            </thead>`;
+
+    const rowsHtml =
+      filteredPayments.length === 0
+        ? `<tbody><tr><td colspan="6" style="text-align:center;padding:12px;">${t.noData}</td></tr></tbody>`
+        : '<tbody>' +
+          filteredPayments
+            .map((p, idx) => {
+              const spareParts =
+                p.items && p.items.length > 0
+                  ? p.items
+                      .map((item) =>
+                        `${capitalizeName(item.sparepart_name || 'Unknown')} (${(item.sparepart_number || 'N/A')
+                          .toUpperCase()
+                          .replace(/</g, '&lt;')})`
+                      )
+                      .join('<br />')
+                  : (capitalizeName(p.sparepart_name || 'Unknown') || '—').replace(/</g, '&lt;');
+              const statusLabel =
+                p.status === 'Approved' ? (t.approved || 'Approved') : p.status === 'Rejected' ? (t.rejected || 'Rejected') : (t.pending || 'Pending');
+              return `
+                <tr>
+                  <td class="tc">${idx + 1}</td>
+                  <td class="tl">${p.created_at ? formatDateTime(p.created_at) : ''}</td>
+                  <td class="tl">${(p.customer_name || '—').toUpperCase().replace(/</g, '&lt;')}</td>
+                  <td class="tl">${spareParts}</td>
+                  <td class="tc">${statusLabel}</td>
+                  <td class="tr">${formatPrice(p.total_amount)}</td>
+                </tr>
+              `;
+            })
+            .join('') +
+          '</tbody>';
+
+    reportWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>Sales Reports - ${periodLabel}</title>
+          <title>Sales Report - Mamuya Auto Spare Parts</title>
           <style>
+            * { box-sizing: border-box; }
             body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-              margin: 20px;
-              color: #333;
-            }
-            .report-wrapper {
-              max-width: 1000px;
+              font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+              max-width: 900px;
               margin: 0 auto;
+              padding: 24px;
+              color: #222;
+              font-size: 11px;
+              line-height: 1.4;
             }
-            .report-header {
+            .tax-inv-top {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 24px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid #333;
+            }
+            .tax-inv-left {
+              display: flex;
+              align-items: flex-start;
+              gap: 20px;
+              flex: 1;
+            }
+            .tax-inv-logo {
+              max-height: 60px;
+              max-width: 140px;
+              object-fit: contain;
+            }
+            .tax-inv-company { flex: 1; }
+            .tax-inv-company h2 {
+              margin: 0 0 10px 0;
+              font-size: 1.15rem;
+              font-weight: 700;
+              color: #111;
+              letter-spacing: 0.02em;
+            }
+            .tax-inv-address { margin: 0; color: #444; font-size: 10px; line-height: 1.5; }
+            .tax-inv-meta { text-align: right; min-width: 180px; }
+            .tax-inv-meta p { margin: 0 0 6px 0; font-size: 11px; }
+            .tax-inv-title {
               text-align: center;
-              margin-bottom: 30px;
-              border-bottom: 2px solid #1a3a5f;
-              padding-bottom: 15px;
+              font-size: 1.6rem;
+              font-weight: 700;
+              margin: 24px 0;
+              letter-spacing: 0.05em;
             }
-            .company-name {
-              font-size: 1.5rem;
-              font-weight: 600;
-              color: #1a3a5f;
-              margin-bottom: 5px;
-            }
-            .report-title {
-              font-size: 1.2rem;
-              font-weight: 500;
-              color: #666;
-            }
-            .report-date {
-              margin-top: 10px;
-              font-size: 0.9rem;
-              color: #888;
-            }
-            .stats-section {
-              display: grid;
-              grid-template-columns: repeat(2, 1fr);
-              gap: 15px;
-              margin-bottom: 30px;
-            }
-            .stat-card-print {
-              border: 1px solid #ddd;
-              border-radius: 8px;
-              padding: 15px;
-              background: #f9f9f9;
-            }
-            .stat-title-print {
-              font-size: 0.9rem;
-              color: #666;
-              margin-bottom: 5px;
-            }
-            .stat-value-print {
-              font-size: 1.3rem;
-              font-weight: 600;
-              color: #1a3a5f;
-            }
-            .table-section {
-              margin-top: 30px;
-            }
-            .section-title {
-              font-size: 1.2rem;
-              font-weight: 600;
-              margin-bottom: 15px;
-              color: #1a3a5f;
-            }
-            table {
+            .tax-inv-table {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 10px;
+              margin: 0 0 20px 0;
+              font-size: 10px;
+              border: 1px solid #333;
             }
-            th {
-              background-color: #1a3a5f;
-              color: white;
-              padding: 12px;
-              text-align: left;
-              font-weight: 600;
-              border: 1px solid #1a3a5f;
+            .tax-inv-table th,
+            .tax-inv-table td {
+              border: 1px solid #333;
+              padding: 6px 8px;
+              vertical-align: middle;
             }
-            td {
-              padding: 10px 12px;
-              border: 1px solid #ddd;
-            }
-            tr:nth-child(even) {
-              background-color: #f9f9f9;
-            }
-            .footer {
+            .tax-inv-table th {
+              background: #f0f0f0;
+              font-weight: 700;
               text-align: center;
-              margin-top: 30px;
-              font-size: 0.85rem;
-              color: #777;
-              border-top: 1px solid #eee;
-              padding-top: 15px;
+              font-size: 10px;
             }
-            @media print {
-              body { margin: 0; }
-              .report-wrapper { max-width: 100%; }
+            .tax-inv-table th.tl { text-align: left; }
+            .tax-inv-table .tc { text-align: center; }
+            .tax-inv-table .tr { text-align: right; }
+            .tax-inv-table .tl { text-align: left; }
+            .tax-inv-table tbody tr { background: #fff; }
+            .tax-inv-footer {
+              margin-top: 28px;
+              font-size: 11px;
+              border-top: 1px solid #ccc;
+              padding-top: 16px;
             }
+            .tax-inv-footer-row { margin-bottom: 12px; }
+            .tax-inv-footer-row label { display: inline-block; min-width: 220px; font-weight: 600; }
+            .tax-inv-disclaimer {
+              margin-top: 28px;
+              font-style: italic;
+              color: #666;
+              font-size: 10px;
+            }
+            @media print { body { padding: 16px; } .tax-inv-logo { max-height: 52px; } }
           </style>
         </head>
         <body>
-          <div class="report-wrapper">
-            <div class="report-header">
-              <div class="company-name">Mamuya System</div>
-              <div class="report-title">Sales Reports - ${periodLabel}</div>
-              <div class="report-date">Generated on ${currentDate}</div>
-            </div>
-
-            <div class="stats-section">
-              <div class="stat-card-print">
-                <div class="stat-title-print">${t.totalTransactions}</div>
-                <div class="stat-value-print">${totalCount}</div>
-              </div>
-              <div class="stat-card-print">
-                <div class="stat-title-print">${t.pending}</div>
-                <div class="stat-value-print">${pendingCount}</div>
-              </div>
-              <div class="stat-card-print">
-                <div class="stat-title-print">${t.approved}</div>
-                <div class="stat-value-print">${approvedCount}</div>
+          <div class="tax-inv-top">
+            <div class="tax-inv-left">
+              <img src="${String(logoSrcForPrint).replace(/"/g, '&quot;')}" alt="Logo" class="tax-inv-logo" />
+              <div class="tax-inv-company">
+                <h2>Mamuya Auto Spare Parts</h2>
+                <p class="tax-inv-address">
+                  Kilimanjaro, Tanzania<br />
+                  Phone: +255 22 123 4567
+                </p>
               </div>
             </div>
-
-            <div class="table-section">
-              <div class="section-title">${t.totalTransactions} (${filteredPayments.length})</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>${t.date}</th>
-                    <th>${t.customer}</th>
-                    <th>${t.sparePart}</th>
-                    <th>${t.status}</th>
-                    <th>${t.totalAmount}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${filteredPayments.length === 0 
-                    ? `<tr><td colspan="5" style="text-align: center; padding: 20px;">${t.noData}</td></tr>`
-                    : filteredPayments.map((p) => {
-                        const sparePartsList = p.items && p.items.length > 0
-                          ? p.items.map(item => `${capitalizeName(item.sparepart_name || 'Unknown')} (${(item.sparepart_number || 'N/A').toUpperCase()})`).join(', ')
-                          : capitalizeName(p.sparepart_name || 'Unknown');
-                        return `
-                          <tr>
-                            <td>${p.created_at ? p.created_at.replace('T', ' ').slice(0, 16) : ''}</td>
-                            <td>${capitalizeName(p.customer_name)}</td>
-                            <td>${sparePartsList}</td>
-                            <td>${p.status === 'Approved' ? t.approved : p.status === 'Rejected' ? t.rejected : t.pending}</td>
-                            <td>${formatCurrency(p.total_amount)}</td>
-                          </tr>
-                        `;
-                      }).join('')
-                  }
-                </tbody>
-              </table>
-            </div>
-
-            <div class="footer">
-              This report was generated by ${capitalizeName(user?.full_name || user?.username || 'Sales Employee')} on ${currentDateTime}
+            <div class="tax-inv-meta">
+              <p><strong>Report:</strong> Sales (All statuses)</p>
+              <p><strong>Period:</strong> ${dateRangeLabel}</p>
+              <p><strong>Printed:</strong> ${new Date().toLocaleString('en-GB')}</p>
+              <p><strong>Printed by:</strong> ${(user?.full_name || user?.username || 'Sales Staff').replace(/</g, '&lt;')}</p>
             </div>
           </div>
-          <script>
-            window.onload = function() {
-              window.print();
-              window.onafterprint = function() { window.close(); };
-            };
-          </script>
+
+          <h1 class="tax-inv-title">SALES REPORT</h1>
+
+          <table class="tax-inv-table">
+            ${tableHeader}
+            ${rowsHtml}
+          </table>
+
+          <div class="tax-inv-footer">
+            <div class="tax-inv-footer-row"><label>Total transactions:</label> ${totalCount}</div>
+            <div class="tax-inv-footer-row"><label>Approved:</label> ${approvedCount}</div>
+            <div class="tax-inv-footer-row"><label>Pending:</label> ${pendingCount}</div>
+            <div class="tax-inv-footer-row"><label>Rejected:</label> ${rejectedCount}</div>
+            <div class="tax-inv-footer-row"><label>Total amount (TZS):</label> ${formatPrice(totalAmount)}</div>
+          </div>
+
+          <p class="tax-inv-disclaimer">*This is a computer generated sales report, hence no signature is required.*</p>
         </body>
       </html>
-    `;
-
-    const printWindow = window.open('', '_blank', 'width=1000,height=700');
-    if (!printWindow) {
-      Swal.fire({
-        icon: 'error',
-        title: 'Popup Blocked',
-        text: t.allowPopups,
-        confirmButtonColor: '#1a3a5f'
-      });
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(printContent);
-    printWindow.document.close();
+    `);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
   };
 
-  // Filter payments by time period
-  const filterByTimePeriod = (paymentList) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
-    return paymentList.filter((p) => {
-      if (!p.created_at) return false;
-      
-      const paymentDate = new Date(p.created_at);
-      const paymentDateOnly = new Date(paymentDate.getFullYear(), paymentDate.getMonth(), paymentDate.getDate());
-      
-      switch (timePeriod) {
-        case 'today':
-          return paymentDateOnly.getTime() === today.getTime();
-        
-        case 'weekly': {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          return paymentDateOnly >= weekAgo && paymentDateOnly <= today;
-        }
-        
-        case 'monthly': {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          return paymentDateOnly >= monthAgo && paymentDateOnly <= today;
-        }
-        
-        default:
-          return true;
-      }
-    });
+  const isInDateRange = (dateStr, from, to) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    if (!from && !to) return true;
+    const dateOnly = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (from && dateOnly < from) return false;
+    if (to && dateOnly > to) return false;
+    return true;
   };
 
-  // Filter data by time period first, then by search term
-  const timeFilteredPayments = filterByTimePeriod(payments);
+  const timeFilteredPayments = payments.filter((p) => isInDateRange(p.created_at, dateFrom, dateTo));
   const filteredPayments = timeFilteredPayments.filter((p) => {
     const term = searchTerm.toLowerCase();
     return (
@@ -405,6 +415,9 @@ function SalesReports() {
       (p.sparepart_number && p.sparepart_number.toLowerCase().includes(term))
     );
   });
+
+  // Only show approved transactions in the on-screen table
+  const approvedPaymentsForTable = filteredPayments.filter((p) => p.status === 'Approved');
 
   // Aggregate totals
   const totalAmount = filteredPayments.reduce(
@@ -515,16 +528,39 @@ function SalesReports() {
               />
             </div>
             <div className="filter-box">
-              <select
-                value={timePeriod}
-                onChange={(e) => setTimePeriod(e.target.value)}
-                className="status-filter"
-              >
-                <option value="today">{t.today}</option>
-                <option value="weekly">{t.weekly}</option>
-                <option value="monthly">{t.monthly}</option>
-              </select>
+              <label className="sales-reports-date-label">From</label>
+              <input
+                type="date"
+                className="status-filter sales-reports-date-input"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+                title="Filter from date"
+              />
             </div>
+            <div className="filter-box">
+              <label className="sales-reports-date-label">To</label>
+              <input
+                type="date"
+                className="status-filter sales-reports-date-input"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+                title="Filter to date"
+              />
+            </div>
+            {(dateFrom || dateTo) ? (
+              <div className="filter-box">
+                <button
+                  type="button"
+                  className="sales-reports-clear-dates"
+                  onClick={() => { setDateFrom(''); setDateTo(''); }}
+                  title="Clear date filter"
+                >
+                  Clear dates
+                </button>
+              </div>
+            ) : null}
             <button className="action-btn print" onClick={handlePrintReports}>
               <FaPrint className="action-icon" />
               <span className="action-text">{t.printReport}</span>
@@ -566,14 +602,14 @@ function SalesReports() {
                 </tr>
               </thead>
               <tbody>
-                {filteredPayments.length === 0 ? (
+                {approvedPaymentsForTable.length === 0 ? (
                   <tr>
                     <td colSpan="5" className="no-data">
                       No transactions found
                     </td>
                   </tr>
                 ) : (
-                  filteredPayments.slice(0, 20).map((p) => (
+                  approvedPaymentsForTable.slice(0, 20).map((p) => (
                     <tr key={p.id}>
                       <td>{p.created_at ? p.created_at.replace('T', ' ').slice(0, 16) : ''}</td>
                       <td>{capitalizeName(p.customer_name)}</td>

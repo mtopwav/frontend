@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { FaChartLine, FaBars, FaSignOutAlt, FaUser, FaMoneyBillWave, FaChartBar, FaShoppingCart, FaFileInvoice, FaReceipt, FaCalendarAlt, FaCheckCircle, FaTimesCircle, FaClock, FaBox, FaUsers } from 'react-icons/fa';
+import Swal from 'sweetalert2';
 import '../sales/payments.css';
 import './dashboard.css';
 import logo from '../../images/logo.png';
@@ -67,7 +68,20 @@ function ManagerDashboard() {
     return () => clearInterval(t);
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');

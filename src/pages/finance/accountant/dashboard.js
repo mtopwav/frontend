@@ -19,6 +19,7 @@ import logo from '../../../images/logo.png';
 import { getRevenues, getExpenses } from '../../../services/api';
 import ThemeToggle from '../../../components/ThemeToggle';
 import LanguageSelector from '../../../components/LanguageSelector';
+import Swal from 'sweetalert2';
 
 const QUICK_LINKS = [
   { to: '/finance/accountant/transactions', icon: FaReceipt, label: 'Transactions', desc: 'Sales & payments' },
@@ -95,7 +96,20 @@ function FinanceDashboard() {
     );
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -132,6 +146,10 @@ function FinanceDashboard() {
           <Link to="/finance/accountant/transactions" className={'nav-item' + (location.pathname === '/finance/accountant/transactions' ? ' active' : '')}>
             <FaReceipt className="nav-icon" />
             <span>Transactions</span>
+          </Link>
+          <Link to="/finance/accountant/loans" className={'nav-item' + (location.pathname === '/finance/accountant/loans' ? ' active' : '')}>
+            <FaMoneyBillWave className="nav-icon" />
+            <span>Loans</span>
           </Link>
           <Link to="/finance/accountant/expenses" className={'nav-item' + (location.pathname === '/finance/accountant/expenses' ? ' active' : '')}>
             <FaArrowDown className="nav-icon" />

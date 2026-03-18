@@ -151,7 +151,20 @@ function SalesSpareParts() {
     );
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: t.logout || 'Logout',
+      text: t.areYouSureLogout || 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: t.yesLogout || 'Yes, logout',
+      cancelButtonText: t.cancel || 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -194,6 +207,10 @@ function SalesSpareParts() {
     (part.category && part.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (part.brand && part.brand.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (part.location && part.location.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  const sortedParts = [...filteredParts].sort((a, b) =>
+    String(a.partName || '').toLowerCase().localeCompare(String(b.partName || '').toLowerCase())
   );
 
   // Calculate statistics - only in stock and out of stock counts
@@ -355,14 +372,14 @@ function SalesSpareParts() {
                 </tr>
               </thead>
               <tbody>
-                {filteredParts.length === 0 ? (
+                {sortedParts.length === 0 ? (
                   <tr>
                     <td colSpan="7" className="no-data">
                       {t.noData}
                     </td>
                   </tr>
                 ) : (
-                  filteredParts.map(part => (
+                  sortedParts.map(part => (
                     <tr key={part.id}>
                       <td>
                         <div className="part-name">
@@ -385,7 +402,7 @@ function SalesSpareParts() {
                       <td>
                         <span className="brand-badge">
                           <FaIndustry className="brand-icon" />
-                          {capitalizeName(part.brand)}
+                          {(part.brand || '—').toUpperCase()}
                         </span>
                       </td>
                       <td>{part.quantity}</td>
@@ -426,7 +443,7 @@ function SalesSpareParts() {
                   <label>
                     <FaBarcode /> {t.partNumber}
                   </label>
-                  <div className="view-value">{selectedPart.partNumber?.toUpperCase()}</div>
+                  <div className="view-value">{(selectedPart.partNumber || '—').toUpperCase()}</div>
                 </div>
                 <div className="view-item">
                   <label>
@@ -438,7 +455,7 @@ function SalesSpareParts() {
                   <label>
                     <FaIndustry /> {t.brand}
                   </label>
-                  <div className="view-value">{capitalizeName(selectedPart.brand)}</div>
+                  <div className="view-value">{(selectedPart.brand || '—').toUpperCase()}</div>
                 </div>
                 <div className="view-item">
                   <label>

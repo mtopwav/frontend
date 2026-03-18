@@ -101,7 +101,8 @@ function GenerateSales() {
             wholesale_price: p.wholesale_price != null ? Number(p.wholesale_price) : null,
             retail_price: p.retail_price != null ? Number(p.retail_price) : null,
             unitPrice: p.retail_price,
-            status: p.status
+            status: p.status,
+            stockQuantity: p.quantity != null ? Number(p.quantity) : 0
           }));
           setSpareParts(formattedParts);
         }
@@ -174,7 +175,20 @@ function GenerateSales() {
     return null;
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: t.logout || 'Logout',
+      text: t.areYouSureLogout || 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: t.yesLogout || 'Yes, logout',
+      cancelButtonText: t.cancel || 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -295,12 +309,22 @@ function GenerateSales() {
   // Update quantity for a specific part (allow typing; 0 = empty display)
   const handleUpdatePartQuantity = (partId, newQuantity) => {
     const raw = String(newQuantity).replace(/\D/g, '');
-    const value = raw === '' ? 0 : Math.max(1, parseInt(raw, 10) || 0);
+    let value = raw === '' ? 0 : Math.max(1, parseInt(raw, 10) || 0);
     const updatedParts = selectedParts.map(sp => {
-      if (String(sp.partId) === String(partId)) {
-        return { ...sp, quantity: value };
+      if (String(sp.partId) !== String(partId)) return sp;
+
+      const stock = sp.part && sp.part.stockQuantity != null ? Number(sp.part.stockQuantity) : null;
+      if (stock != null && stock > 0 && value > stock) {
+        Swal.fire({
+          icon: 'warning',
+          title: 'Stock limit exceeded',
+          text: `Only ${stock} unit(s) of "${capitalizeName(sp.part.name)}" are available in stock.`,
+          confirmButtonColor: '#1a3a5f'
+        });
+        value = stock;
       }
-      return sp;
+
+      return { ...sp, quantity: value };
     });
     setSelectedParts(updatedParts);
   };
@@ -350,13 +374,32 @@ function GenerateSales() {
     const customer = customers.find(c => String(c.id) === String(selectedCustomerId));
 
     try {
+      // Build helper list with quantities and prices
+      const withQty = selectedParts.map(sp => {
+        const unitPrice = getUnitPrice(sp.part);
+        const qty = Math.max(0, parseInt(sp.quantity, 10) || 0);
+        return { sp, unitPrice, qty };
+      });
+
+      // Check stock limits before creating items
+      const overStock = withQty.find(({ sp, qty }) => {
+        const stock = sp.part && sp.part.stockQuantity != null ? Number(sp.part.stockQuantity) : null;
+        return stock != null && stock >= 0 && qty > stock;
+      });
+
+      if (overStock) {
+        const stock = overStock.sp.part.stockQuantity;
+        Swal.fire({
+          icon: 'warning',
+          title: 'Stock limit exceeded',
+          text: `Quantity for "${capitalizeName(overStock.sp.part.name)}" cannot be greater than available stock (${stock}).`,
+          confirmButtonColor: '#1a3a5f'
+        });
+        return;
+      }
+
       // Build items with quantity > 0 only; total amount = sum of (unit_price × quantity) per item
-      const items = selectedParts
-        .map(sp => {
-          const unitPrice = getUnitPrice(sp.part);
-          const qty = Math.max(0, parseInt(sp.quantity, 10) || 0);
-          return { sp, unitPrice, qty };
-        })
+      const items = withQty
         .filter(({ qty }) => qty > 0)
         .map(({ sp, unitPrice, qty }) => ({
           sparepart_id: sp.part.id,

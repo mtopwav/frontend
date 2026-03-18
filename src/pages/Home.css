@@ -309,30 +309,94 @@
 }
 
 @media (max-width: 480px) {
+  .home-header {
+    padding: 12px 15px;
+  }
+
+  .header-title {
+    font-size: 1.1rem;
+  }
+
+  .header-logo {
+    width: 35px;
+    height: 35px;
+  }
+
+  .hero-section {
+    padding: 50px 15px;
+  }
+
   .hero-title {
     font-size: 1.8rem;
+    margin-bottom: 20px;
   }
 
   .hero-description {
     font-size: 1rem;
+    margin-bottom: 30px;
   }
 
   .cta-button {
     padding: 14px 35px;
     font-size: 1rem;
+    width: 100%;
+    max-width: 300px;
+    min-height: 48px;
+  }
+
+  .features-section {
+    padding: 50px 15px;
   }
 
   .section-title {
     font-size: 1.6rem;
+    margin-bottom: 40px;
+  }
+
+  .features-grid {
+    gap: 20px;
+  }
+
+  .feature-card {
+    padding: 25px 20px;
   }
 
   .feature-icon {
     width: 70px;
     height: 70px;
     font-size: 1.8rem;
+    margin-bottom: 20px;
   }
 
   .feature-title {
     font-size: 1.2rem;
+    margin-bottom: 12px;
+  }
+
+  .feature-description {
+    font-size: 0.95rem;
+  }
+
+  .home-footer {
+    padding: 30px 15px;
+  }
+
+  .footer-text {
+    font-size: 0.9rem;
+  }
+
+  .footer-note {
+    font-size: 0.85rem;
+  }
+}
+
+/* Touch-friendly adjustments */
+@media (hover: none) and (pointer: coarse) {
+  .cta-button {
+    min-height: 48px;
+  }
+
+  .feature-card:hover {
+    transform: none;
   }
 }

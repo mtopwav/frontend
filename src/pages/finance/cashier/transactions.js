@@ -142,7 +142,20 @@ function CashierTransactions() {
     );
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: t.logout || 'Logout',
+      text: t.areYouSureLogout || 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: t.yesLogout || 'Yes, logout',
+      cancelButtonText: t.cancel || 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -165,9 +178,14 @@ function CashierTransactions() {
     });
   };
 
+  // Calculate total amount, taking discount into account if present.
   const getTotalAmount = (payment) => {
+    if (!payment) return 0;
+
+    let baseTotal;
+
     if (payment.items && payment.items.length > 0) {
-      return payment.items.reduce((sum, item) => {
+      baseTotal = payment.items.reduce((sum, item) => {
         const qty = Number(item.quantity) || 0;
         const unit = Number(item.unit_price) || 0;
         const itemTotal =
@@ -176,10 +194,14 @@ function CashierTransactions() {
             : qty * unit;
         return sum + itemTotal;
       }, 0);
+    } else {
+      const qty = Number(payment.quantity) || 0;
+      const unit = Number(payment.unit_price) || 0;
+      baseTotal = qty * unit;
     }
-    const qty = Number(payment.quantity) || 0;
-    const unit = Number(payment.unit_price) || 0;
-    return qty * unit;
+
+    const discount = parseFloat(payment.discount_amount) || 0;
+    return Math.max(0, baseTotal - discount);
   };
 
   const formatWithCommas = (val) => {
@@ -284,20 +306,37 @@ function CashierTransactions() {
 
   const handleConfirmApprove = async () => {
     if (!selectedPayment) return;
+    // Prevent double-approval if status is already Approved
+    if (selectedPayment.status === 'Approved') {
+      Swal.fire({
+        icon: 'info',
+        title: t.alreadyApprovedTitle || 'Already approved',
+        text: t.alreadyApprovedMessage || 'This transaction has already been approved.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
     const received = Number(amountReceivedInput) || 0;
     const total = getTotalAmount(selectedPayment);
     const amountRemain = Math.max(0, total - received);
     setApproving(true);
     try {
-      const response = await updatePaymentDetails(selectedPayment.id, {
+      const responseDetails = await updatePaymentDetails(selectedPayment.id, {
         amount_received: received,
         amount_remain: amountRemain,
         payment_method: paymentMethodInput,
         confirmed_by_cashier_id: user?.id,
       });
-      if (!response.success) {
-        throw new Error(response.message || 'Failed to confirm transaction');
+      if (!responseDetails.success) {
+        throw new Error(responseDetails.message || 'Failed to confirm transaction');
       }
+
+      // Immediately mark transaction as Approved (no manager approval needed)
+      const responseStatus = await updatePaymentStatus(selectedPayment.id, 'Approved', user?.id);
+      if (!responseStatus.success) {
+        throw new Error(responseStatus.message || 'Failed to set transaction status to Approved');
+      }
+
       setPayments((prev) =>
         prev.map((p) =>
           p.id === selectedPayment.id
@@ -306,7 +345,8 @@ function CashierTransactions() {
                 amount_received: received,
                 amount_remain: amountRemain,
                 payment_method: paymentMethodInput,
-                status: 'Pending',
+                status: 'Approved',
+                approved_at: new Date().toISOString(),
               }
             : p
         )
@@ -315,9 +355,12 @@ function CashierTransactions() {
       Swal.fire({
         icon: 'success',
         title: t.confirmed,
-        text: t.transactionConfirmedPending,
+        text: t.transactionApprovedSuccess || 'Transaction approved successfully.',
         confirmButtonColor: '#1a3a5f',
       });
+
+      // Navigate directly to receipts page after approval
+      navigate('/finance/cashier/receipts');
     } catch (error) {
       console.error('Error confirming transaction:', error);
       Swal.fire({
@@ -334,8 +377,17 @@ function CashierTransactions() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const isPaymentInDateRange = (createdAt) => {
-    const d = new Date(createdAt);
+  const getRecordDateForFilters = (payment) => {
+    if (!payment) return null;
+    // For approved transactions, use approved date for records (fallback to created_at)
+    if (payment.status === 'Approved') return payment.approved_at || payment.approvedAt || payment.confirmed_at || payment.created_at;
+    return payment.created_at;
+  };
+
+  const isPaymentInDateRange = (payment) => {
+    const recordDate = getRecordDateForFilters(payment);
+    if (!recordDate) return false;
+    const d = new Date(recordDate);
     d.setHours(0, 0, 0, 0);
     const t = today.getTime();
     const p = d.getTime();
@@ -355,7 +407,7 @@ function CashierTransactions() {
   };
 
   const filteredPayments = payments.filter((payment) => {
-    if (!isPaymentInDateRange(payment.created_at)) return false;
+    if (!isPaymentInDateRange(payment)) return false;
 
     const term = searchTerm.toLowerCase().trim();
 
@@ -392,7 +444,7 @@ function CashierTransactions() {
   
   const approvedCount = payments.filter((p) => {
     if (p.status !== 'Approved') return false;
-    const pDate = new Date(p.created_at);
+    const pDate = new Date(getRecordDateForFilters(p));
     pDate.setHours(0, 0, 0, 0);
     return pDate.getTime() === today.getTime();
   }).length;
@@ -539,29 +591,73 @@ function CashierTransactions() {
             <table className="payments-table">
               <thead>
                 <tr>
+                  <th>{t.actions}</th>
                   <th>{t.customer}</th>
                   <th>{t.sparePart}</th>
                   <th>{t.quantity}</th>
                   <th>{t.unitPrice}</th>
                   <th>{t.totalAmount}</th>
+                  <th>{t.discount || 'Discount'}</th>
                   <th>{t.paymentMethod}</th>
                   <th>{t.amountReceived}</th>
                   <th>{t.amountRemain}</th>
                   <th>{t.status}</th>
                   <th>{t.date}</th>
-                  <th>{t.actions}</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredPayments.length === 0 ? (
                   <tr>
-                    <td colSpan="9" className="no-data">
+                    <td colSpan="11" className="no-data">
                       {t.noTransactionsFound}
                     </td>
                   </tr>
                 ) : (
                   filteredPayments.map((payment) => (
                     <tr key={payment.id}>
+                      <td>
+                        <div className="action-buttons">
+                          <button
+                            className="action-btn view"
+                            title={t.viewDetails}
+                            onClick={() => handleView(payment)}
+                          >
+                            <FaEye className="action-icon" />
+                          </button>
+                          {payment.status === 'Pending' && (
+                            <>
+                              <button
+                                className="action-btn approve"
+                                title={t.approve}
+                                onClick={() => {
+                                  setSelectedPayment(payment);
+                                  const total = getTotalAmount(payment);
+                                  const received =
+                                    payment.amount_received != null
+                                      ? Math.min(
+                                          Math.max(Number(payment.amount_received) || 0, 0),
+                                          total
+                                        )
+                                      : 0;
+                                  setAmountReceivedInput(
+                                    payment.amount_received != null ? String(received) : ''
+                                  );
+                                  setShowApproveModal(true);
+                                }}
+                              >
+                                <FaCheckCircle className="action-icon" />
+                              </button>
+                              <button
+                                className="action-btn reject"
+                                title={t.reject}
+                                onClick={() => handleChangeStatus(payment, 'Rejected')}
+                              >
+                                <FaTimesCircle className="action-icon" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
                       <td>
                         <div className="customer-info">
                           <FaUsers className="info-icon" />
@@ -617,6 +713,11 @@ function CashierTransactions() {
                       <td className="amount-cell">
                         TZS {formatPrice(getTotalAmount(payment))}
                       </td>
+                      <td className="amount-cell">
+                        {payment.discount_amount != null
+                          ? `TZS ${formatPrice(payment.discount_amount)}`
+                          : '—'}
+                      </td>
                       <td>
                         <span className="payment-method-badge">
                           {payment.payment_method || '—'}
@@ -664,52 +765,6 @@ function CashierTransactions() {
                         })()}
                       </td>
                       <td>{formatDateTime(payment.created_at)}</td>
-                      <td>
-                        <div className="action-buttons">
-                          <button
-                            className="action-btn view"
-                            title={t.viewDetails}
-                            onClick={() => handleView(payment)}
-                          >
-                            <FaEye className="action-icon" />
-                            <span className="action-text">{t.view}</span>
-                          </button>
-                          {payment.status === 'Pending' && (
-                            <>
-                              <button
-                                className="action-btn approve"
-                                title={t.approve}
-                                onClick={() => {
-                                  setSelectedPayment(payment);
-                                  const total = getTotalAmount(payment);
-                                  const received =
-                                    payment.amount_received != null
-                                      ? Math.min(
-                                          Math.max(Number(payment.amount_received) || 0, 0),
-                                          total
-                                        )
-                                      : 0;
-                                  setAmountReceivedInput(
-                                    payment.amount_received != null ? String(received) : ''
-                                  );
-                                  setShowApproveModal(true);
-                                }}
-                              >
-                                <FaCheckCircle className="action-icon" />
-                                <span className="action-text">{t.approve}</span>
-                              </button>
-                              <button
-                                className="action-btn reject"
-                                title={t.reject}
-                                onClick={() => handleChangeStatus(payment, 'Rejected')}
-                              >
-                                <FaTimesCircle className="action-icon" />
-                                <span className="action-text">{t.reject}</span>
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
                     </tr>
                   ))
                 )}
@@ -818,6 +873,12 @@ function CashierTransactions() {
                   <label>{t.totalAmount}</label>
                   <div className="view-value" style={{ fontWeight: 'bold', fontSize: '1.1em' }}>
                     TZS {formatPrice(getTotalAmount(selectedPayment))}
+                  </div>
+                </div>
+                <div className="view-item">
+                  <label>{t.discount || 'Discount'}</label>
+                  <div className="view-value">
+                    TZS {formatPrice(selectedPayment.discount_amount || 0)}
                   </div>
                 </div>
                 <div className="view-item">

@@ -108,6 +108,10 @@ function CategoriesBrands() {
           name: cat.name,
           createdAt: cat.created_at ? new Date(cat.created_at).toISOString() : new Date().toISOString()
         }));
+        // Arrange categories in alphabetical order A–Z (case-insensitive)
+        mappedCategories.sort((a, b) =>
+          String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
+        );
         setCategories(mappedCategories);
         console.log(`✅ Loaded ${mappedCategories.length} categories from database`);
       } else {
@@ -138,6 +142,10 @@ function CategoriesBrands() {
           name: brand.name,
           createdAt: brand.created_at ? new Date(brand.created_at).toISOString() : new Date().toISOString()
         }));
+        // Sort brands alphabetically A–Z (case-insensitive)
+        mappedBrands.sort((a, b) =>
+          String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
+        );
         setBrands(mappedBrands);
         console.log(`✅ Loaded ${mappedBrands.length} brands from database`);
       } else {
@@ -156,7 +164,20 @@ function CategoriesBrands() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: t.logout || 'Logout',
+      text: t.areYouSureLogout || 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: t.yesLogout || 'Yes, logout',
+      cancelButtonText: t.cancel || 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -652,7 +673,9 @@ function CategoriesBrands() {
                       <td>
                         <div className="item-name">
                           <FaTags className="name-icon" />
-                          {capitalizeName(item.name)}
+                          {activeTab === 'brands'
+                            ? String(item.name || '').toUpperCase()
+                            : capitalizeName(item.name)}
                         </div>
                       </td>
                       <td>

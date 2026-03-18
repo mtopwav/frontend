@@ -1,14 +1,9 @@
-// services/api.js
-
-// ✅ Single source of truth for API URL
-// Use relative /api when proxy is set (package.json "proxy": "http://localhost:5000"), else absolute URL
-const API_BASE_URL =
-  process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+const API_BASE_URL = "/api";
 
 /**
  * Generic API request helper
  */
-const apiRequest = async (endpoint, options = {}) => {
+export const apiRequest = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
 
   const config = {
@@ -231,6 +226,15 @@ export const updateSparePart = (id, updateData) => {
 };
 
 /**
+ * Delete spare part
+ */
+export const deleteSparePart = (id) => {
+  return apiRequest(`/spareparts/${id}`, {
+    method: "DELETE"
+  });
+};
+
+/**
  * Get all customers
  */
 export const getCustomers = () => {
@@ -294,6 +298,15 @@ export const updatePaymentStatus = (id, status, approverId) => {
 };
 
 /**
+ * Delete payment (used when transaction is cancelled)
+ */
+export const deletePayment = (id) => {
+  return apiRequest(`/payments/${id}`, {
+    method: "DELETE"
+  });
+};
+
+/**
  * Update payment details (amount_received, amount_remain, payment_method) without changing status.
  * Used when cashier confirms; status remains Pending until manager approves.
  */
@@ -301,6 +314,13 @@ export const updatePaymentDetails = (id, { amount_received, amount_remain, payme
   return apiRequest(`/payments/${id}/details`, {
     method: "PUT",
     body: { amount_received, amount_remain, payment_method, confirmed_by_cashier_id }
+  });
+};
+
+export const returnPayment = (id, { return_amount }) => {
+  return apiRequest(`/payments/${id}/return`, {
+    method: "PUT",
+    body: { return_amount }
   });
 };
 

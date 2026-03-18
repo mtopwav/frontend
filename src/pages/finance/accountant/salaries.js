@@ -97,7 +97,20 @@ function AccountantSalaries() {
     load();
   }, [navigate]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -340,6 +353,10 @@ function AccountantSalaries() {
           <Link to="/finance/accountant/transactions" className={'nav-item' + (location.pathname === '/finance/accountant/transactions' ? ' active' : '')}>
             <FaReceipt className="nav-icon" />
             <span>Transactions</span>
+          </Link>
+          <Link to="/finance/accountant/loans" className={'nav-item' + (location.pathname === '/finance/accountant/loans' ? ' active' : '')}>
+            <FaMoneyBillWave className="nav-icon" />
+            <span>Loans</span>
           </Link>
           <Link to="/finance/accountant/expenses" className={'nav-item' + (location.pathname === '/finance/accountant/expenses' ? ' active' : '')}>
             <FaArrowDown className="nav-icon" />

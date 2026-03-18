@@ -20,6 +20,7 @@ import { getCurrentDateTime } from '../../utils/dateTime';
 import { useTranslation } from '../../utils/useTranslation';
 import ThemeToggle from '../../components/ThemeToggle';
 import { getUnviewedOperationsCount } from '../../utils/notifications';
+import Swal from 'sweetalert2';
 
 function Messages() {
   const navigate = useNavigate();
@@ -70,7 +71,20 @@ function Messages() {
     };
   }, [navigate]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: t.logout || 'Logout',
+      text: t.areYouSureLogout || 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: t.yesLogout || 'Yes, logout',
+      cancelButtonText: t.cancel || 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');

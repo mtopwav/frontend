@@ -282,6 +282,14 @@
 
 /* Responsive Design */
 @media (max-width: 768px) {
+  .header-band {
+    height: 50px;
+  }
+
+  .login-main-content {
+    padding: 30px 20px;
+  }
+
   .login-card {
     padding: 30px 25px;
   }
@@ -293,32 +301,95 @@
   .login-logo {
     width: 80px;
   }
+
+  .form-control {
+    font-size: 16px; /* Prevents zoom on iOS */
+    min-height: 44px;
+  }
 }
 
 @media (max-width: 480px) {
+  .header-band {
+    height: 45px;
+  }
+
   .login-main-content {
     padding: 20px 15px;
   }
 
+  .login-container {
+    max-width: 100%;
+  }
+
   .login-card {
     padding: 25px 20px;
+    border-radius: 8px;
+  }
+
+  .login-logo-container {
+    margin-bottom: 20px;
+  }
+
+  .login-logo {
+    width: 70px;
   }
 
   .login-title {
     font-size: 1.5rem;
+    margin-bottom: 8px;
   }
 
   .login-subtitle {
     font-size: 0.85rem;
+    margin-bottom: 25px;
+  }
+
+  .form-group {
+    margin-bottom: 18px;
+  }
+
+  .form-control {
+    padding: 14px 15px;
+    font-size: 16px; /* Prevents zoom on iOS */
+    min-height: 48px;
   }
 
   .form-options {
     flex-direction: column;
     align-items: flex-start;
+    gap: 12px;
   }
 
   .forgot-password-link {
-    margin-top: 5px;
+    margin-top: 0;
+    font-size: 0.85rem;
+  }
+
+  .login-btn {
+    padding: 14px;
+    font-size: 1rem;
+    min-height: 48px;
+  }
+
+  .footer-band {
+    padding: 12px 15px;
+  }
+
+  .footer-band p {
+    font-size: 0.85rem;
+  }
+}
+
+/* Touch-friendly adjustments */
+@media (hover: none) and (pointer: coarse) {
+  .password-toggle-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
+  }
+
+  .login-btn {
+    min-height: 48px;
   }
 }
 

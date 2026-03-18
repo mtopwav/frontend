@@ -30,9 +30,12 @@ function CashierReports() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [timePeriod, setTimePeriod] = useState('today'); // 'today', 'weekly', 'monthly'
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all'); // 'all' | 'cash' | 'bank' | 'mobile'
   const [payments, setPayments] = useState([]);
   const [currentDateTime, setCurrentDateTime] = useState(getCurrentDateTime());
+  const [logoDataUrl, setLogoDataUrl] = useState(null);
 
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -93,6 +96,22 @@ function CashierReports() {
 
     return () => clearInterval(dateTimeInterval);
   }, [navigate]);
+
+  // Load logo as data URL for printing (so it appears in new window)
+  useEffect(() => {
+    if (typeof logo !== 'string' || !logo) return;
+    const src = logo.startsWith('http')
+      ? logo
+      : window.location.origin + (logo.startsWith('/') ? logo : '/' + logo);
+    fetch(src)
+      .then((r) => r.blob())
+      .then((blob) => {
+        const reader = new FileReader();
+        reader.onloadend = () => setLogoDataUrl(reader.result);
+        reader.readAsDataURL(blob);
+      })
+      .catch(() => {});
+  }, []);
 
   if (loading) {
     return (
@@ -168,257 +187,235 @@ function CashierReports() {
   };
 
   const handlePrintReports = () => {
-    const periodLabel = timePeriod === 'today' ? t.todayFilter : timePeriod === 'weekly' ? t.weekly : t.monthly;
-    const currentDate = new Date().toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
+    const reportWindow = window.open('', '_blank', 'width=1000,height=700');
+    if (!reportWindow) return;
 
-    // Build printable HTML document
-    const printContent = `
+    const logoPath = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    const logoUrl = logoPath
+      ? logoPath.startsWith('http')
+        ? logoPath
+        : window.location.origin + (logoPath.startsWith('/') ? logoPath : '/' + logoPath)
+      : window.location.origin + '/logo192.png';
+    const logoSrcForPrint = logoDataUrl || logoUrl;
+
+    const dateRangeLabel =
+      dateFrom && dateTo
+        ? `${dateFrom} to ${dateTo}`
+        : dateFrom
+        ? `From ${dateFrom}`
+        : dateTo
+        ? `Until ${dateTo}`
+        : 'All time';
+
+    const tableHeader = `
+            <thead>
+              <tr>
+                <th class="tc">S.No</th>
+                <th class="tl">Date</th>
+                <th class="tl">Customer</th>
+                <th class="tl">Items</th>
+                <th class="tc">Payment method</th>
+                <th class="tr">Amount received (TZS)</th>
+                <th class="tl">Status</th>
+              </tr>
+            </thead>`;
+
+    const approvedForPrint = filteredPayments.filter((p) => p.status === 'Approved');
+
+    const rowsHtml =
+      approvedForPrint.length === 0
+        ? '<tbody><tr><td colspan="7" style="text-align:center;padding:12px;">No transactions found</td></tr></tbody>'
+        : '<tbody>' +
+          approvedForPrint
+            .map((p, idx) => {
+              const items =
+                p.items && p.items.length > 0
+                  ? p.items
+                      .map((item) => (item.sparepart_name || 'Unknown').replace(/</g, '&lt;'))
+                      .join('<br />')
+                  : (p.sparepart_name || '—').replace(/</g, '&lt;');
+              return `
+                <tr>
+                  <td class="tc">${idx + 1}</td>
+                  <td class="tl">${p.created_at ? p.created_at.replace('T', ' ').slice(0, 16) : ''}</td>
+                  <td class="tl">${(p.customer_name || '—').toUpperCase().replace(/</g, '&lt;')}</td>
+                  <td class="tl">${items}</td>
+                  <td class="tc">${(p.payment_method || '—').replace(/</g, '&lt;')}</td>
+                  <td class="tr">${formatCurrency(p.amount_received || 0)}</td>
+                  <td class="tl">${getStatusLabel(p.status)}</td>
+                </tr>
+              `;
+            })
+            .join('') +
+          '</tbody>';
+
+    reportWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>${t.cashierReportsTitle} - ${periodLabel}</title>
+          <title>Transactions Report - Mamuya Auto Spare Parts</title>
           <style>
+            * { box-sizing: border-box; }
             body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-              margin: 20px;
-              color: #333;
-            }
-            .report-wrapper {
-              max-width: 1000px;
+              font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+              max-width: 900px;
               margin: 0 auto;
+              padding: 24px;
+              color: #222;
+              font-size: 11px;
+              line-height: 1.4;
             }
-            .report-header {
-              text-align: center;
-              margin-bottom: 30px;
-              border-bottom: 2px solid #1a3a5f;
-              padding-bottom: 15px;
+            .tax-inv-top {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 24px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid #333;
             }
-            .report-logo {
-              height: 36px;
-              width: auto;
-              max-width: 96px;
+            .tax-inv-left {
+              display: flex;
+              align-items: flex-start;
+              gap: 20px;
+              flex: 1;
+            }
+            .tax-inv-logo {
+              max-height: 60px;
+              max-width: 140px;
               object-fit: contain;
-              display: block;
-              margin: 0 auto 10px;
             }
-            .company-name {
-              font-size: 1.5rem;
-              font-weight: 600;
-              color: #1a3a5f;
-              margin-bottom: 5px;
+            .tax-inv-company { flex: 1; }
+            .tax-inv-company h2 {
+              margin: 0 0 10px 0;
+              font-size: 1.15rem;
+              font-weight: 700;
+              color: #111;
+              letter-spacing: 0.02em;
             }
-            .report-title {
-              font-size: 1.2rem;
-              font-weight: 500;
-              color: #666;
+            .tax-inv-address { margin: 0; color: #444; font-size: 10px; line-height: 1.5; }
+            .tax-inv-meta { text-align: right; min-width: 180px; }
+            .tax-inv-meta p { margin: 0 0 6px 0; font-size: 11px; }
+            .tax-inv-title {
+              text-align: center;
+              font-size: 1.6rem;
+              font-weight: 700;
+              margin: 24px 0;
+              letter-spacing: 0.05em;
             }
-            .report-date {
-              margin-top: 10px;
-              font-size: 0.9rem;
-              color: #888;
-            }
-            .stats-section {
-              display: grid;
-              grid-template-columns: repeat(2, 1fr);
-              gap: 15px;
-              margin-bottom: 30px;
-            }
-            .stat-card-print {
-              border: 1px solid #ddd;
-              border-radius: 8px;
-              padding: 15px;
-              background: #f9f9f9;
-            }
-            .stat-title-print {
-              font-size: 0.9rem;
-              color: #666;
-              margin-bottom: 5px;
-            }
-            .stat-value-print {
-              font-size: 1.3rem;
-              font-weight: 600;
-              color: #1a3a5f;
-            }
-            .table-section {
-              margin-top: 30px;
-            }
-            .section-title {
-              font-size: 1.2rem;
-              font-weight: 600;
-              margin-bottom: 15px;
-              color: #1a3a5f;
-            }
-            table {
+            .tax-inv-table {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 10px;
+              margin: 0 0 20px 0;
+              font-size: 10px;
+              border: 1px solid #333;
             }
-            th {
-              background-color: #1a3a5f;
-              color: white;
-              padding: 12px;
-              text-align: left;
-              font-weight: 600;
-              border: 1px solid #1a3a5f;
+            .tax-inv-table th,
+            .tax-inv-table td {
+              border: 1px solid #333;
+              padding: 6px 8px;
+              vertical-align: middle;
             }
-            td {
-              padding: 10px 12px;
-              border: 1px solid #ddd;
-            }
-            tr:nth-child(even) {
-              background-color: #f9f9f9;
-            }
-            .footer {
+            .tax-inv-table th {
+              background: #f0f0f0;
+              font-weight: 700;
               text-align: center;
-              margin-top: 30px;
-              font-size: 0.85rem;
-              color: #777;
-              border-top: 1px solid #eee;
-              padding-top: 15px;
+              font-size: 10px;
             }
-            @media print {
-              body {
-                margin: 0;
-              }
+            .tax-inv-table th.tl { text-align: left; }
+            .tax-inv-table .tc { text-align: center; }
+            .tax-inv-table .tr { text-align: right; }
+            .tax-inv-table .tl { text-align: left; }
+            .tax-inv-table tbody tr { background: #fff; }
+            .tax-inv-footer {
+              margin-top: 28px;
+              font-size: 11px;
+              border-top: 1px solid #ccc;
+              padding-top: 16px;
             }
+            .tax-inv-footer-row { margin-bottom: 12px; }
+            .tax-inv-footer-row label { display: inline-block; min-width: 200px; font-weight: 600; }
+            .tax-inv-disclaimer {
+              margin-top: 28px;
+              font-style: italic;
+              color: #666;
+              font-size: 10px;
+            }
+            @media print { body { padding: 16px; } .tax-inv-logo { max-height: 52px; } }
           </style>
         </head>
         <body>
-          <div class="report-wrapper">
-            <div class="report-header">
-              <img src="${window.location.origin}/logo192.png" alt="Logo" class="report-logo" />
-              <div class="company-name">Mamuya Auto Spare Parts</div>
-              <div class="report-title">${t.cashierReportsTitle} - ${periodLabel}</div>
-              <div class="report-date">${t.generatedOn}: ${currentDate}</div>
-            </div>
-
-            <div class="stats-section">
-              <div class="stat-card-print">
-                <div class="stat-title-print">${t.totalAmount}</div>
-                <div class="stat-value-print">${formatCurrency(totalAmount)}</div>
-              </div>
-              <div class="stat-card-print">
-                <div class="stat-title-print">${t.totalTransactions}</div>
-                <div class="stat-value-print">${totalCount}</div>
-              </div>
-              <div class="stat-card-print">
-                <div class="stat-title-print">${t.approved}</div>
-                <div class="stat-value-print">${approvedCount}</div>
-              </div>
-              <div class="stat-card-print">
-                <div class="stat-title-print">${t.pending}</div>
-                <div class="stat-value-print">${pendingCount}</div>
+          <div class="tax-inv-top">
+            <div class="tax-inv-left">
+              <img src="${String(logoSrcForPrint).replace(/"/g, '&quot;')}" alt="Logo" class="tax-inv-logo" />
+              <div class="tax-inv-company">
+                <h2>Mamuya Auto Spare Parts</h2>
+                <p class="tax-inv-address">
+                  Kilimanjaro, Tanzania<br />
+                  Phone: +255 22 123 4567
+                </p>
               </div>
             </div>
-
-            <div class="table-section">
-              <div class="section-title">${t.transactionsCount} (${filteredPayments.length})</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>${t.date}</th>
-                    <th>${t.customer}</th>
-                    <th>${t.sparePart}</th>
-                    <th>${t.method}</th>
-                    <th>${t.status}</th>
-                    <th>${t.amount}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${filteredPayments.length === 0 
-                    ? `<tr><td colspan="6" style="text-align: center; padding: 20px;">${t.noTransactionsFound}</td></tr>`
-                    : filteredPayments.map((p) => {
-                        const sparePartsList = p.items && p.items.length > 0
-                          ? p.items.map(item => `${capitalizeName(item.sparepart_name || 'Unknown')} (${(item.sparepart_number || 'N/A').toUpperCase()})`).join(', ')
-                          : capitalizeName(p.sparepart_name || 'Unknown');
-                        return `
-                          <tr>
-                            <td>${p.created_at ? p.created_at.replace('T', ' ').slice(0, 16) : ''}</td>
-                            <td>${capitalizeName(p.customer_name)}</td>
-                            <td>${sparePartsList}</td>
-                            <td>${p.payment_method}</td>
-                            <td>${getStatusLabel(p.status)}</td>
-                            <td>${formatCurrency(p.amount_received)}</td>
-                          </tr>
-                        `;
-                      }).join('')
-                  }
-                </tbody>
-              </table>
-            </div>
-
-            <div class="footer">
-              ${t.reportGeneratedBy} ${capitalizeName(user?.full_name || user?.username || 'Cashier')} on ${currentDateTime}
+            <div class="tax-inv-meta">
+              <p><strong>Report:</strong> Cashier Transactions</p>
+              <p><strong>Period:</strong> ${dateRangeLabel}</p>
+              <p><strong>Printed:</strong> ${new Date().toLocaleString('en-GB')}</p>
+              <p><strong>Printed by:</strong> ${(user?.full_name || user?.username || 'Cashier').replace(/</g, '&lt;')}</p>
             </div>
           </div>
-          <script>
-            window.onload = function() {
-              window.print();
-              window.onafterprint = function() { window.close(); };
-            };
-          </script>
+
+          <h1 class="tax-inv-title">TRANSACTIONS REPORT</h1>
+
+          <table class="tax-inv-table">
+            ${tableHeader}
+            ${rowsHtml}
+          </table>
+
+          <div class="tax-inv-footer">
+            <div class="tax-inv-footer-row"><label>Total amount received (TZS):</label> ${formatCurrency(totalAmount)}</div>
+            <div class="tax-inv-footer-row"><label>Cash (TZS):</label> ${formatCurrency(cashTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Bank transfer (TZS):</label> ${formatCurrency(bankTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Mobile payments (TZS):</label> ${formatCurrency(mobileTotal)}</div>
+          </div>
+
+          <p class="tax-inv-disclaimer">*This is a computer generated transactions report, hence no signature is required.*</p>
         </body>
       </html>
-    `;
-
-    const printWindow = window.open('', '_blank', 'width=1000,height=700');
-    if (!printWindow) {
-      Swal.fire({
-        icon: 'error',
-        title: t.popupBlocked,
-        text: t.allowPopups,
-        confirmButtonColor: '#1a3a5f'
-      });
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(printContent);
-    printWindow.document.close();
+    `);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
   };
 
   // Filter payments by time period
-  const filterByTimePeriod = (paymentList) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
+  const filterByDateRange = (paymentList) => {
+    if (!dateFrom && !dateTo) return paymentList;
     return paymentList.filter((p) => {
       if (!p.created_at) return false;
-      
-      const paymentDate = new Date(p.created_at);
-      const paymentDateOnly = new Date(paymentDate.getFullYear(), paymentDate.getMonth(), paymentDate.getDate());
-      
-      switch (timePeriod) {
-        case 'today':
-          return paymentDateOnly.getTime() === today.getTime();
-        
-        case 'weekly': {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          return paymentDateOnly >= weekAgo && paymentDateOnly <= today;
-        }
-        
-        case 'monthly': {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          return paymentDateOnly >= monthAgo && paymentDateOnly <= today;
-        }
-        
-        default:
-          return true;
-      }
+      const d = new Date(p.created_at);
+      if (isNaN(d.getTime())) return false;
+      const dateOnly = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate()
+      ).padStart(2, '0')}`;
+      if (dateFrom && dateOnly < dateFrom) return false;
+      if (dateTo && dateOnly > dateTo) return false;
+      return true;
     });
   };
 
-  // Filter data by time period first, then by search term
-  const timeFilteredPayments = filterByTimePeriod(payments);
-  const filteredPayments = timeFilteredPayments.filter((p) => {
+  // Filter data by selected date range first, then by payment method, then by search term
+  const timeFilteredPayments = filterByDateRange(payments);
+
+  const methodFilteredPayments = timeFilteredPayments.filter((p) => {
+    if (paymentMethodFilter === 'all') return true;
+    const method = (p.payment_method || '').toLowerCase();
+    if (paymentMethodFilter === 'cash') return method === 'cash';
+    if (paymentMethodFilter === 'bank') return method === 'bank transfer';
+    if (paymentMethodFilter === 'mobile') return method === 'mobile' || method === 'mobile money';
+    return true;
+  });
+
+  const filteredPayments = methodFilteredPayments.filter((p) => {
     const term = searchTerm.toLowerCase();
     return (
       (p.customer_name && p.customer_name.toLowerCase().includes(term)) ||
@@ -427,15 +424,31 @@ function CashierReports() {
     );
   });
 
-  // Aggregate totals
+  // Aggregate totals (use amount_received so it reflects cash, mobile, bank transfer received in the selected period)
   const totalAmount = filteredPayments.reduce(
-    (sum, p) => sum + (parseFloat(p.total_amount) || 0),
+    (sum, p) => sum + (parseFloat(p.amount_received) || 0),
     0
   );
   const totalCount = filteredPayments.length;
   const pendingCount = filteredPayments.filter((p) => p.status === 'Pending').length;
   const approvedCount = filteredPayments.filter((p) => p.status === 'Approved').length;
   const rejectedCount = filteredPayments.filter((p) => p.status === 'Rejected').length;
+
+  // Totals by payment method (from the same filtered set)
+  const cashTotal = filteredPayments
+    .filter((p) => (p.payment_method || '').toLowerCase() === 'cash')
+    .reduce((sum, p) => sum + (parseFloat(p.amount_received) || 0), 0);
+
+  const bankTotal = filteredPayments
+    .filter((p) => (p.payment_method || '').toLowerCase() === 'bank transfer')
+    .reduce((sum, p) => sum + (parseFloat(p.amount_received) || 0), 0);
+
+  const mobileTotal = filteredPayments
+    .filter((p) => {
+      const method = (p.payment_method || '').toLowerCase();
+      return method === 'mobile' || method === 'mobile money';
+    })
+    .reduce((sum, p) => sum + (parseFloat(p.amount_received) || 0), 0);
 
 
   return (
@@ -522,14 +535,37 @@ function CashierReports() {
               />
             </div>
             <div className="reports-period-filter">
+              <label className="filter-label">From</label>
+              <input
+                type="date"
+                className="reports-period-select"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+                title="Filter from date"
+              />
+            </div>
+            <div className="reports-period-filter">
+              <label className="filter-label">To</label>
+              <input
+                type="date"
+                className="reports-period-select"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+                title="Filter to date"
+              />
+            </div>
+            <div className="reports-period-filter">
               <select
-                value={timePeriod}
-                onChange={(e) => setTimePeriod(e.target.value)}
+                value={paymentMethodFilter}
+                onChange={(e) => setPaymentMethodFilter(e.target.value)}
                 className="reports-period-select"
               >
-                <option value="today">{t.todayFilter}</option>
-                <option value="weekly">{t.weekly}</option>
-                <option value="monthly">{t.monthly}</option>
+                <option value="all">{t.allMethods}</option>
+                <option value="cash">{t.cash}</option>
+                <option value="bank">{t.bankTransfer}</option>
+                <option value="mobile">{t.mobileLabel}</option>
               </select>
             </div>
             <button
@@ -564,22 +600,28 @@ function CashierReports() {
                 <p className="stat-value">{formatCurrency(totalAmount)}</p>
               </div>
             </div>
-            <div className="stat-card stat-primary">
-              <div className="stat-info">
-                <h3 className="stat-title">{t.totalTransactions}</h3>
-                <p className="stat-value">{totalCount}</p>
-              </div>
-            </div>
             <div className="stat-card stat-info">
               <div className="stat-info">
                 <h3 className="stat-title">{t.approved}</h3>
                 <p className="stat-value">{approvedCount}</p>
               </div>
             </div>
-            <div className="stat-card stat-warning">
+            <div className="stat-card stat-primary">
               <div className="stat-info">
-                <h3 className="stat-title">{t.pending}</h3>
-                <p className="stat-value">{pendingCount}</p>
+                <h3 className="stat-title">{t.cash}</h3>
+                <p className="stat-value">{formatCurrency(cashTotal)}</p>
+              </div>
+            </div>
+            <div className="stat-card stat-primary">
+              <div className="stat-info">
+                <h3 className="stat-title">{t.bankTransfer}</h3>
+                <p className="stat-value">{formatCurrency(bankTotal)}</p>
+              </div>
+            </div>
+            <div className="stat-card stat-primary">
+              <div className="stat-info">
+                <h3 className="stat-title">{t.mobileLabel}</h3>
+                <p className="stat-value">{formatCurrency(mobileTotal)}</p>
               </div>
             </div>
           </div>
@@ -599,14 +641,17 @@ function CashierReports() {
                 </tr>
               </thead>
               <tbody>
-                {filteredPayments.length === 0 ? (
+                {filteredPayments.filter((p) => p.status === 'Approved').length === 0 ? (
                   <tr>
                     <td colSpan="6" className="no-data">
                       {t.noTransactionsFound}
                     </td>
                   </tr>
                 ) : (
-                  filteredPayments.slice(0, 20).map((p) => (
+                  filteredPayments
+                    .filter((p) => p.status === 'Approved')
+                    .slice(0, 20)
+                    .map((p) => (
                     <tr key={p.id}>
                       <td>{p.created_at ? p.created_at.replace('T', ' ').slice(0, 16) : ''}</td>
                       <td>{capitalizeName(p.customer_name)}</td>

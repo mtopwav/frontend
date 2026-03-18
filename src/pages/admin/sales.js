@@ -19,12 +19,15 @@ import {
   FaTimesCircle,
   FaClock,
   FaCalendarAlt,
-  FaBell
+  FaBell,
+  FaPlus,
+  FaTimes,
+  FaPrint
 } from 'react-icons/fa';
 import './categories&brands.css';
 import '../sales/payments.css';
 import logo from '../../images/logo.png';
-import { getPayments } from '../../services/api';
+import { getPayments, createPayment, getCustomers, getEmployees, getSpareParts } from '../../services/api';
 import { formatDateTime, getCurrentDateTime } from '../../utils/dateTime';
 import { useTranslation } from '../../utils/useTranslation';
 import ThemeToggle from '../../components/ThemeToggle';
@@ -45,6 +48,21 @@ function Sales() {
   const [currentDateTime, setCurrentDateTime] = useState('');
   const [dateFormatVersion, setDateFormatVersion] = useState(0); // Force re-render when format changes
   const [notificationCount, setNotificationCount] = useState(0);
+  
+  // Generate Sales Modal State
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [spareParts, setSpareParts] = useState([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [customerSearchInput, setCustomerSearchInput] = useState('');
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [selectedParts, setSelectedParts] = useState([]);
+  const [partSearchInput, setPartSearchInput] = useState('');
+  const [showPartDropdown, setShowPartDropdown] = useState(false);
+  const [priceType, setPriceType] = useState('retail');
+  const [loadingData, setLoadingData] = useState(false);
 
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -85,6 +103,43 @@ function Sales() {
 
     loadPayments();
 
+    // Load data for generate sales modal
+    const loadGenerateSalesData = async () => {
+      setLoadingData(true);
+      try {
+        const [customersRes, employeesRes, sparePartsRes] = await Promise.all([
+          getCustomers(),
+          getEmployees(),
+          getSpareParts()
+        ]);
+
+        if (customersRes.success && customersRes.customers) {
+          setCustomers(customersRes.customers);
+        }
+
+        if (employeesRes.success && employeesRes.employees) {
+          setEmployees(employeesRes.employees);
+        }
+
+        if (sparePartsRes.success && sparePartsRes.spareParts) {
+          const formattedParts = sparePartsRes.spareParts.map(p => ({
+            id: p.id,
+            name: p.part_name,
+            partNumber: p.part_number,
+            brand: p.brand_name || 'Unknown',
+            wholesale_price: p.wholesale_price != null ? Number(p.wholesale_price) : null,
+            retail_price: p.retail_price != null ? Number(p.retail_price) : null,
+            status: p.status
+          }));
+          setSpareParts(formattedParts);
+        }
+      } catch (error) {
+        console.error('Error loading generate sales data:', error);
+      } finally {
+        setLoadingData(false);
+      }
+    };
+
     // Initialize and update current date/time every second
     setCurrentDateTime(getCurrentDateTime());
     const dateTimeInterval = setInterval(() => {
@@ -111,6 +166,60 @@ function Sales() {
       window.removeEventListener('unviewedOperationsChanged', updateNotificationCount);
     };
   }, [navigate]);
+
+  // Load data when generate modal opens
+  useEffect(() => {
+    if (showGenerateModal) {
+      const loadGenerateSalesData = async () => {
+        setLoadingData(true);
+        try {
+          const [customersRes, employeesRes, sparePartsRes] = await Promise.all([
+            getCustomers(),
+            getEmployees(),
+            getSpareParts()
+          ]);
+
+          if (customersRes.success && customersRes.customers) {
+            setCustomers(customersRes.customers);
+          }
+
+          if (employeesRes.success && employeesRes.employees) {
+            setEmployees(employeesRes.employees);
+          }
+
+          if (sparePartsRes.success && sparePartsRes.spareParts) {
+            const formattedParts = sparePartsRes.spareParts.map(p => ({
+              id: p.id,
+              name: p.part_name,
+              partNumber: p.part_number,
+              brand: p.brand_name || 'Unknown',
+              wholesale_price: p.wholesale_price != null ? Number(p.wholesale_price) : null,
+              retail_price: p.retail_price != null ? Number(p.retail_price) : null,
+              status: p.status
+            }));
+            setSpareParts(formattedParts);
+          }
+        } catch (error) {
+          console.error('Error loading generate sales data:', error);
+        } finally {
+          setLoadingData(false);
+        }
+      };
+      loadGenerateSalesData();
+    }
+  }, [showGenerateModal]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.customer-dropdown-container') && !event.target.closest('.part-dropdown-container')) {
+        setShowCustomerDropdown(false);
+        setShowPartDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   if (loading) {
     return (
@@ -156,6 +265,41 @@ function Sales() {
     }).format(amount || 0);
   };
 
+  // Helpers for printable receipt (same style as manager/transactions)
+  const formatCurrencyPrint = (amount) => {
+    const num = parseFloat(amount) || 0;
+    return new Intl.NumberFormat('en-TZ', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(num);
+  };
+
+  const formatDateInvoice = (dateStr) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const day = d.getDate();
+    const month = d.getMonth() + 1;
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const numberToWords = (n) => {
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    const num = Math.floor(parseFloat(n) || 0);
+    if (num === 0) return 'Zero';
+    const g = (x) => {
+      if (x < 20) return ones[x];
+      if (x < 100) return tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
+      return ones[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' + g(x % 100) : '');
+    };
+    if (num < 1000) return g(num);
+    if (num < 1000000) return g(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + g(num % 1000) : '');
+    if (num < 1000000000) return g(Math.floor(num / 1000000)) + ' Million' + (num % 1000000 ? ' ' + numberToWords(num % 1000000) : '');
+    return g(Math.floor(num / 1000000000)) + ' Billion' + (num % 1000000000 ? ' ' + numberToWords(num % 1000000000) : '');
+  };
+
   const formatPrice = (price) => {
     if (!price) return '0';
     return parseFloat(price).toLocaleString('en-US', {
@@ -167,6 +311,428 @@ function Sales() {
   const handleView = (payment) => {
     setSelectedPayment(payment);
     setShowViewModal(true);
+  };
+
+  const getPaymentTotalAmount = (payment) => {
+    if (payment.items && payment.items.length > 0) {
+      return payment.items.reduce((sum, item) => {
+        const qty = Number(item.quantity) || 0;
+        const unit = Number(item.unit_price) || 0;
+        const itemTotal =
+          item.total_amount != null && item.total_amount !== undefined
+            ? Number(item.total_amount) || 0
+            : qty * unit;
+        return sum + itemTotal;
+      }, 0);
+    }
+    const qty = Number(payment.quantity) || 0;
+    const unit = Number(payment.unit_price) || 0;
+    return qty * unit;
+  };
+
+  const handlePrintReceipt = (payment) => {
+    if (!payment || payment.status !== 'Approved') return;
+
+    const totalAmount = getPaymentTotalAmount(payment);
+    const discount = Number(payment.discount_amount) || 0;
+    const subTotal = totalAmount;
+    const totalAmountFinal = Math.max(0, subTotal - discount);
+    const amountReceived = Number(payment.amount_received) || 0;
+    const amountRemain = Math.max(0, totalAmountFinal - amountReceived);
+
+    const dateStr = formatDateInvoice(payment.created_at);
+    const trnNo = '182-150-770';
+    const invNum = `RCPT-${payment.id}`;
+    const customerName = (payment.customer_name || '—').replace(/</g, '&lt;');
+
+    let items = [];
+    if (payment.items && payment.items.length > 0) {
+      items = payment.items;
+    } else {
+      items = [{
+        part_name: payment.sparepart_name || '—',
+        part_number: payment.sparepart_number || '—',
+        quantity: payment.quantity || 1,
+        unit_price: payment.unit_price || 0,
+        total_amount: parseFloat(payment.unit_price || 0) * (parseInt(payment.quantity || 1, 10) || 1)
+      }];
+    }
+
+    const hasItems = items.length > 0;
+
+    const logoUrl = typeof logo === 'string' && logo
+      ? (logo.startsWith('http') ? logo : window.location.origin + (logo.startsWith('/') ? logo : '/' + logo))
+      : '';
+    const logoImg = logoUrl ? `<img src="${String(logoUrl).replace(/"/g, '&quot;')}" alt="Logo" class="tax-inv-logo" />` : '';
+
+    const itemRows = hasItems
+      ? items.map((it, i) => {
+          const qty = parseInt(it.quantity, 10) || 1;
+          const rate = parseFloat(it.unit_price) || 0;
+          const amount = rate * qty;
+          return `<tr>
+            <td class="tc">${i + 1}</td>
+            <td>${(it.part_name || it.sparepart_name || '—').replace(/</g, '&lt;')}</td>
+            <td>${(it.part_number || it.sparepart_number || '—').replace(/</g, '&lt;')}</td>
+            <td class="tr">${qty}</td>
+            <td class="tr">${formatCurrencyPrint(rate)}</td>
+            <td>PCS</td>
+            <td class="tr">${formatCurrencyPrint(amount)}</td>
+            <td class="tr">${formatCurrencyPrint(amount)}</td>
+          </tr>`;
+        }).join('')
+      : `<tr>
+          <td class="tc">1</td>
+          <td>—</td>
+          <td>—</td>
+          <td class="tr">1</td>
+          <td class="tr">${formatCurrencyPrint(totalAmount)}</td>
+          <td>PCS</td>
+          <td class="tr">${formatCurrencyPrint(totalAmount)}</td>
+          <td class="tr">${formatCurrencyPrint(totalAmount)}</td>
+        </tr>`;
+
+    const amountInWords = numberToWords(Math.floor(totalAmountFinal)) + ' TZS Only';
+
+    const printContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Receipt ${invNum}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; color: #222; font-size: 11px; line-height: 1.4; }
+    .tax-inv-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 2px solid #333; }
+    .tax-inv-left { display: flex; align-items: flex-start; gap: 20px; flex: 1; }
+    .tax-inv-logo { max-height: 60px; max-width: 140px; object-fit: contain; }
+    .tax-inv-company { flex: 1; }
+    .tax-inv-company h2 { margin: 0 0 10px 0; font-size: 1.15rem; font-weight: 700; color: #111; letter-spacing: 0.02em; }
+    .tax-inv-address { margin: 0; color: #444; font-size: 10px; line-height: 1.5; }
+    .tax-inv-contact { margin-top: 8px; font-size: 10px; color: #555; }
+    .tax-inv-contact span { margin-right: 16px; }
+    .tax-inv-meta { text-align: right; min-width: 180px; }
+    .tax-inv-meta p { margin: 0 0 6px 0; font-size: 11px; }
+    .tax-inv-title { text-align: center; font-size: 1.6rem; font-weight: 700; margin: 24px 0; letter-spacing: 0.05em; }
+    .tax-inv-customer { margin-bottom: 18px; padding: 8px 0; }
+    .tax-inv-customer strong { display: inline-block; min-width: 130px; font-size: 11px; }
+    .tax-inv-table { width: 100%; border-collapse: collapse; margin: 0 0 20px 0; font-size: 10px; border: 1px solid #333; }
+    .tax-inv-table th, .tax-inv-table td { border: 1px solid #333; padding: 6px 8px; vertical-align: middle; }
+    .tax-inv-table th { background: #f0f0f0; font-weight: 700; text-align: center; font-size: 10px; }
+    .tax-inv-table th.tl { text-align: left; }
+    .tax-inv-table th .sub { display: block; font-weight: 400; font-size: 9px; color: #444; margin-top: 1px; }
+    .tax-inv-table .tc { text-align: center; }
+    .tax-inv-table .tr { text-align: right; }
+    .tax-inv-table .tl { text-align: left; }
+    .tax-inv-table tbody tr { background: #fff; }
+    .tax-inv-table .total-row td { font-weight: 600; background: #f0f0f0; }
+    .tax-inv-table .total-row.total-first td { border-top: 2px solid #333; }
+    .tax-inv-table .total-final td { font-weight: 700; font-size: 11px; background: #e8e8e8; }
+    .tax-inv-table .col-labels td { border: 1px solid #333; border-top: none; background: #fff; font-size: 9px; color: #444; padding: 4px 8px; text-align: right; }
+    .tax-inv-footer { margin-top: 28px; font-size: 11px; border-top: 1px solid #ccc; padding-top: 16px; }
+    .tax-inv-footer-row { margin-bottom: 12px; }
+    .tax-inv-footer-row label { display: inline-block; min-width: 180px; font-weight: 600; }
+    .tax-inv-disclaimer { margin-top: 28px; font-style: italic; color: #666; font-size: 10px; }
+    @media print { body { padding: 16px; } .tax-inv-logo { max-height: 52px; } }
+  </style>
+</head>
+<body>
+  <div class="tax-inv-top">
+    <div class="tax-inv-left">
+      ${logoImg}
+      <div class="tax-inv-company">
+        <h2>Mamuya Auto Spare Parts</h2>
+        <p class="tax-inv-address">Kilimanjaro, Tanzania</p>
+        <div class="tax-inv-contact">
+          <span>Tel: +255 757171337</span>
+        </div>
+      </div>
+    </div>
+    <div class="tax-inv-meta">
+      <p><strong>TRN NO:</strong> ${(trnNo).replace(/</g, '&lt;')}</p>
+      <p><strong>Receipt No:</strong> ${invNum}</p>
+      <p><strong>Date:</strong> ${dateStr}</p>
+    </div>
+  </div>
+
+  <h1 class="tax-inv-title">RECEIPT</h1>
+
+  <div class="tax-inv-customer">
+    <strong>Customer Name:</strong> ${customerName}
+  </div>
+
+  <table class="tax-inv-table">
+    <thead>
+      <tr>
+        <th style="width:4%">Sr.No.</th>
+        <th style="width:22%" class="tl">Description</th>
+        <th style="width:11%" class="tl">Part No.</th>
+        <th style="width:7%">Quantity</th>
+        <th style="width:10%"><span>Price</span><span class="sub">TZS</span></th>
+        <th style="width:6%">Per</th>
+        <th style="width:11%"><span>Amount</span><span class="sub">TZS</span></th>
+        <th style="width:12%"><span>Total Amount</span><span class="sub">TZS</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemRows}
+      <tr class="total-row total-first">
+        <td colspan="7" class="tr" style="font-weight:600;">Sub Total</td>
+        <td class="tr">${formatCurrencyPrint(subTotal)}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="7" class="tr" style="font-weight:600;">Discount</td>
+        <td class="tr">-${formatCurrencyPrint(discount)}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="7" class="tr" style="font-weight:600;">Amount Received</td>
+        <td class="tr">${formatCurrencyPrint(amountReceived)}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="7" class="tr" style="font-weight:600;">Amount Remain</td>
+        <td class="tr">${formatCurrencyPrint(amountRemain)}</td>
+      </tr>
+      <tr class="total-row total-final">
+        <td colspan="7" class="tr" style="font-weight:700;">Total Received</td>
+        <td class="tr">${formatCurrencyPrint(amountReceived)}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="tax-inv-footer">
+    <div class="tax-inv-footer-row"><label>TOTAL AMOUNT IN WORDS :</label> ${amountInWords}</div>
+  </div>
+
+  <p class="tax-inv-disclaimer">*This is a computer generated receipt, hence no signature is required.*</p>
+</body>
+</html>`;
+
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Popup Blocked',
+        text: 'Please allow popups to print the receipt.',
+        confirmButtonColor: '#1a3a5f'
+      });
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+
+    const triggerPrint = () => {
+      printWindow.focus();
+      printWindow.print();
+      printWindow.onafterprint = () => printWindow.close();
+    };
+    if (printWindow.document.readyState === 'complete') {
+      setTimeout(triggerPrint, 100);
+    } else {
+      printWindow.onload = () => setTimeout(triggerPrint, 100);
+    }
+  };
+
+  // Generate Sales Modal Functions
+  const handleOpenGenerateModal = () => {
+    setShowGenerateModal(true);
+    // Set default employee to current user if available
+    if (user && user.id) {
+      setSelectedEmployeeId(user.id);
+    }
+  };
+
+  const handleCloseGenerateModal = () => {
+    setShowGenerateModal(false);
+    setSelectedCustomerId('');
+    setSelectedEmployeeId('');
+    setCustomerSearchInput('');
+    setSelectedParts([]);
+    setPartSearchInput('');
+    setShowCustomerDropdown(false);
+    setShowPartDropdown(false);
+  };
+
+  const filteredCustomers = customerSearchInput.trim()
+    ? customers.filter(customer =>
+        customer.name.toLowerCase().includes(customerSearchInput.toLowerCase()) ||
+        customer.phone.includes(customerSearchInput)
+      )
+    : customers;
+
+  const handleCustomerSelect = (customer) => {
+    setSelectedCustomerId(customer.id);
+    setCustomerSearchInput(capitalizeName(customer.name));
+    setShowCustomerDropdown(false);
+  };
+
+  const filteredParts = spareParts.filter(part => {
+    const isNotSelected = !selectedParts.find(sp => String(sp.partId) === String(part.id));
+    const searchLower = partSearchInput.toLowerCase();
+    const matchesSearch = part.name.toLowerCase().includes(searchLower) ||
+      part.partNumber.toLowerCase().includes(searchLower) ||
+      (part.brand && part.brand.toLowerCase().includes(searchLower));
+    return isNotSelected && matchesSearch;
+  });
+
+  const handlePartSelect = (part) => {
+    const alreadySelected = selectedParts.find(sp => String(sp.partId) === String(part.id));
+    if (alreadySelected) {
+      Swal.fire({
+        icon: 'info',
+        title: 'Part Already Added',
+        text: 'This part is already in your list.',
+        confirmButtonColor: '#1a3a5f'
+      });
+      return;
+    }
+
+    if (part.status === 'Out of Stock') {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Out of Stock',
+        text: 'This spare part is out of stock. Please choose another part.',
+        confirmButtonColor: '#1a3a5f'
+      });
+      return;
+    }
+
+    const newPart = {
+      partId: part.id,
+      part: part,
+      quantity: 1
+    };
+    setSelectedParts([...selectedParts, newPart]);
+    setPartSearchInput('');
+    setShowPartDropdown(false);
+  };
+
+  const handleRemovePart = (partId) => {
+    setSelectedParts(selectedParts.filter(sp => String(sp.partId) !== String(partId)));
+  };
+
+  const handleUpdatePartQuantity = (partId, newQuantity) => {
+    const raw = String(newQuantity).replace(/\D/g, '');
+    const value = raw === '' ? 0 : Math.max(1, parseInt(raw, 10) || 0);
+    const updatedParts = selectedParts.map(sp => {
+      if (String(sp.partId) === String(partId)) {
+        return { ...sp, quantity: value };
+      }
+      return sp;
+    });
+    setSelectedParts(updatedParts);
+  };
+
+  const getUnitPrice = (part) => {
+    if (priceType === 'wholesale') {
+      return Number(part.wholesale_price) || 0;
+    }
+    return Number(part.retail_price) || 0;
+  };
+
+  const getTotalAmount = () => {
+    return selectedParts.reduce((sum, selectedPart) => {
+      const unitPrice = getUnitPrice(selectedPart.part);
+      const quantity = Math.max(0, parseInt(selectedPart.quantity, 10) || 0);
+      return sum + unitPrice * quantity;
+    }, 0);
+  };
+
+  const handleGenerateSale = async (e) => {
+    e.preventDefault();
+
+    if (!selectedCustomerId) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Validation Error',
+        text: 'Please select a customer.',
+        confirmButtonColor: '#1a3a5f'
+      });
+      return;
+    }
+
+    if (!selectedEmployeeId) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Validation Error',
+        text: 'Please select an employee.',
+        confirmButtonColor: '#1a3a5f'
+      });
+      return;
+    }
+
+    if (selectedParts.length === 0) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Validation Error',
+        text: 'Please add at least one spare part.',
+        confirmButtonColor: '#1a3a5f'
+      });
+      return;
+    }
+
+    try {
+      const items = selectedParts
+        .map(sp => {
+          const unitPrice = getUnitPrice(sp.part);
+          const qty = Math.max(0, parseInt(sp.quantity, 10) || 0);
+          return { sp, unitPrice, qty };
+        })
+        .filter(({ qty }) => qty > 0)
+        .map(({ sp, unitPrice, qty }) => ({
+          sparepart_id: sp.part.id,
+          quantity: qty,
+          unit_price: unitPrice,
+          total_amount: unitPrice * qty
+        }));
+
+      if (items.length === 0) {
+        Swal.fire({
+          icon: 'error',
+          title: 'Validation Error',
+          text: 'Please add at least one spare part with quantity greater than 0.',
+          confirmButtonColor: '#1a3a5f'
+        });
+        return;
+      }
+
+      const paymentPayload = {
+        customer_id: parseInt(selectedCustomerId),
+        employee_id: parseInt(selectedEmployeeId),
+        price_type: priceType,
+        items
+      };
+
+      const response = await createPayment(paymentPayload);
+
+      if (!response || !response.success) {
+        throw new Error(response?.message || 'Failed to save payment');
+      }
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Success',
+        text: 'Sales generated successfully!',
+        confirmButtonColor: '#1a3a5f'
+      });
+
+      // Reload payments
+      const paymentsResponse = await getPayments();
+      if (paymentsResponse.success && paymentsResponse.payments) {
+        setPayments(paymentsResponse.payments);
+      }
+
+      handleCloseGenerateModal();
+    } catch (error) {
+      console.error('Error creating payment:', error);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: error.message || 'Failed to save payment. Please try again.',
+        confirmButtonColor: '#1a3a5f'
+      });
+    }
   };
 
   // Filter payments by time period
@@ -409,6 +975,26 @@ function Sales() {
                 <option value="monthly">{t.monthly}</option>
               </select>
             </div>
+            <button
+              className="add-btn"
+              onClick={handleOpenGenerateModal}
+              style={{
+                backgroundColor: '#1a3a5f',
+                color: 'white',
+                border: 'none',
+                padding: '10px 20px',
+                borderRadius: '5px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                fontWeight: '500',
+                marginLeft: 'auto'
+              }}
+            >
+              <FaPlus /> Generate Sales
+            </button>
           </div>
 
           {/* Statistics Cards */}
@@ -444,6 +1030,9 @@ function Sales() {
                   <th>{t.quantity}</th>
                   <th>{t.unitPrice}</th>
                   <th>{t.totalAmount}</th>
+                  <th>{t.amountReceived}</th>
+                  <th>{t.amountRemain}</th>
+                  <th>{t.discount || 'Discount'}</th>
                   <th>{t.paymentMethod}</th>
                   <th>{t.status}</th>
                   <th>{t.date}</th>
@@ -544,6 +1133,27 @@ function Sales() {
                       <td className="amount-cell">
                         {formatCurrency(payment.total_amount)}
                       </td>
+                      <td className="amount-cell">
+                        {payment.amount_received != null
+                          ? formatCurrency(payment.amount_received)
+                          : '—'}
+                      </td>
+                      <td className="amount-cell">
+                        {(() => {
+                          const total = parseFloat(payment.total_amount) || 0;
+                          const received = parseFloat(payment.amount_received) || 0;
+                          const remain =
+                            payment.amount_remain != null
+                              ? parseFloat(payment.amount_remain) || 0
+                              : Math.max(0, total - received);
+                          return formatCurrency(remain);
+                        })()}
+                      </td>
+                      <td className="amount-cell">
+                        {payment.discount_amount != null
+                          ? formatCurrency(payment.discount_amount)
+                          : '—'}
+                      </td>
                       <td>
                         <span className="payment-method-badge">
                           {payment.payment_method || '—'}
@@ -580,6 +1190,16 @@ function Sales() {
                             <FaEye className="action-icon" />
                             <span className="action-text">{t.view}</span>
                           </button>
+                          {payment.status === 'Approved' && (
+                            <button
+                              className="action-btn print"
+                              title="Print Receipt"
+                              onClick={() => handlePrintReceipt(payment)}
+                            >
+                              <FaPrint className="action-icon" />
+                              <span className="action-text">Print Receipt</span>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -828,6 +1448,244 @@ function Sales() {
                 {t.close}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Generate Sales Modal */}
+      {showGenerateModal && (
+        <div
+          className="modal-overlay"
+          onClick={handleCloseGenerateModal}
+        >
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' }}
+          >
+            <div className="modal-header">
+              <h2>Generate Sales</h2>
+              <button
+                className="close-btn"
+                onClick={handleCloseGenerateModal}
+              >
+                <FaTimes />
+              </button>
+            </div>
+
+            <form onSubmit={handleGenerateSale}>
+              <div className="form-group">
+                <label>Customer *</label>
+                <div className="customer-dropdown-container" style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    placeholder="Search customer by name or phone..."
+                    value={customerSearchInput}
+                    onChange={(e) => {
+                      setCustomerSearchInput(e.target.value);
+                      setShowCustomerDropdown(true);
+                    }}
+                    onFocus={() => setShowCustomerDropdown(true)}
+                    className="form-input"
+                    required
+                  />
+                  {showCustomerDropdown && filteredCustomers.length > 0 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        backgroundColor: 'white',
+                        border: '1px solid #ddd',
+                        borderRadius: '5px',
+                        maxHeight: '200px',
+                        overflowY: 'auto',
+                        zIndex: 1000,
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                      }}
+                    >
+                      {filteredCustomers.map((customer) => (
+                        <div
+                          key={customer.id}
+                          onClick={() => handleCustomerSelect(customer)}
+                          style={{
+                            padding: '10px',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid #eee'
+                          }}
+                          onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                          onMouseLeave={(e) => e.target.style.backgroundColor = 'white'}
+                        >
+                          <div style={{ fontWeight: '500' }}>{capitalizeName(customer.name)}</div>
+                          <div style={{ fontSize: '0.9rem', color: '#666' }}>{customer.phone}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Employee *</label>
+                <select
+                  value={selectedEmployeeId}
+                  onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                  className="form-input"
+                  required
+                >
+                  <option value="">Select Employee</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {capitalizeName(emp.full_name || emp.name)} - {emp.department || 'N/A'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>Price Type</label>
+                <select
+                  value={priceType}
+                  onChange={(e) => setPriceType(e.target.value)}
+                  className="form-input"
+                >
+                  <option value="retail">Retail</option>
+                  <option value="wholesale">Wholesale</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>Add Spare Parts *</label>
+                <div className="part-dropdown-container" style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    placeholder="Search spare parts..."
+                    value={partSearchInput}
+                    onChange={(e) => {
+                      setPartSearchInput(e.target.value);
+                      setShowPartDropdown(true);
+                    }}
+                    onFocus={() => setShowPartDropdown(true)}
+                    className="form-input"
+                  />
+                  {showPartDropdown && filteredParts.length > 0 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        backgroundColor: 'white',
+                        border: '1px solid #ddd',
+                        borderRadius: '5px',
+                        maxHeight: '200px',
+                        overflowY: 'auto',
+                        zIndex: 1000,
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                      }}
+                    >
+                      {filteredParts.map((part) => (
+                        <div
+                          key={part.id}
+                          onClick={() => handlePartSelect(part)}
+                          style={{
+                            padding: '10px',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid #eee'
+                          }}
+                          onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                          onMouseLeave={(e) => e.target.style.backgroundColor = 'white'}
+                        >
+                          <div style={{ fontWeight: '500' }}>{capitalizeName(part.name)}</div>
+                          <div style={{ fontSize: '0.9rem', color: '#666' }}>
+                            {part.partNumber} - {part.brand} - {formatCurrency(getUnitPrice(part))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {selectedParts.length > 0 && (
+                <div className="form-group">
+                  <label>Selected Parts</label>
+                  <div style={{ border: '1px solid #ddd', borderRadius: '5px', padding: '10px' }}>
+                      {selectedParts.map((sp) => (
+                        <div
+                          key={sp.partId}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '10px',
+                            borderBottom: '1px solid #eee'
+                          }}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: '500' }}>{capitalizeName(sp.part.name)}</div>
+                            <div style={{ fontSize: '0.9rem', color: '#666' }}>
+                              {sp.part.partNumber} - {formatCurrency(getUnitPrice(sp.part))} each
+                            </div>
+                          </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <input
+                            type="number"
+                            min="1"
+                            value={sp.quantity}
+                            onChange={(e) => handleUpdatePartQuantity(sp.partId, e.target.value)}
+                            style={{
+                              width: '80px',
+                              padding: '5px',
+                              border: '1px solid #ddd',
+                              borderRadius: '3px'
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePart(sp.partId)}
+                            style={{
+                              backgroundColor: '#dc3545',
+                              color: 'white',
+                              border: 'none',
+                              padding: '5px 10px',
+                              borderRadius: '3px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <FaTimes />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '2px solid #1a3a5f' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                        <span>Total Amount:</span>
+                        <span>{formatCurrency(getTotalAmount())}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  onClick={handleCloseGenerateModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="submit-btn"
+                  disabled={loadingData}
+                >
+                  {loadingData ? 'Loading...' : 'Generate Sales'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

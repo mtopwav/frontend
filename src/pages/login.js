@@ -42,13 +42,21 @@ function Login() {
       console.log('Login response received:', response);
       
       if (response.success && response.user) {
-        // Store user data: admin from table admin (id, username, plain password not sent); employees from employees table
+        // Store user data: admin from table admin; main from main table; employees from employees table
         const isAdmin = response.user.userType === 'admin';
+        const isMain = response.user.userType === 'main';
         const userData = isAdmin
           ? {
               id: response.user.id,
               username: response.user.username,
               userType: 'admin',
+              full_name: response.user.username
+            }
+          : isMain
+          ? {
+              id: response.user.id,
+              username: response.user.username,
+              userType: 'main',
               full_name: response.user.username
             }
           : {
@@ -76,7 +84,10 @@ function Login() {
         
         // Redirect based on user type and department
         console.log('Redirecting based on user type and department...');
-        if (userData.userType === 'employee') {
+        if (userData.userType === 'main') {
+          console.log('Redirecting Main user to main dashboard...');
+          navigate('/main/dashboard');
+        } else if (userData.userType === 'employee') {
           // Redirect by department name
           if (userData.department === 'Manager' || userData.department === 'Administration') {
             console.log('Redirecting Manager to manager dashboard...');

@@ -12,6 +12,7 @@ import {
   FaArrowDown,
   FaArrowUp,
   FaFilter,
+  FaPrint,
 } from 'react-icons/fa';
 import './dashboard.css';
 import './reports.css';
@@ -27,7 +28,9 @@ function AccountantReports() {
   const [user, setUser] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [periodFilter, setPeriodFilter] = useState('month');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [logoDataUrl, setLogoDataUrl] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [revenues, setRevenues] = useState([]);
 
@@ -69,7 +72,36 @@ function AccountantReports() {
     load();
   }, [navigate]);
 
-  const handleLogout = () => {
+  useEffect(() => {
+    const logoSrc = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    if (!logoSrc) return;
+    const src = logoSrc.startsWith('http')
+      ? logoSrc
+      : window.location.origin + (logoSrc.startsWith('/') ? logoSrc : '/' + logoSrc);
+    fetch(src)
+      .then((r) => r.blob())
+      .then((blob) => {
+        const reader = new FileReader();
+        reader.onloadend = () => setLogoDataUrl(reader.result);
+        reader.readAsDataURL(blob);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -97,42 +129,260 @@ function AccountantReports() {
     return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const toDateOnly = (dateStr) => {
-    if (!dateStr) return null;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return null;
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  };
-
-  const isInPeriod = (dateStr, period) => {
+  const isInDateRange = (dateStr, from, to) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return false;
-    const now = new Date();
-    if (period === 'all') return true;
-    if (period === 'month') {
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }
-    if (period === 'week') {
-      const nowOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).getTime();
-      const itemOnly = toDateOnly(dateStr);
-      return itemOnly != null && itemOnly >= weekStart && itemOnly <= nowOnly;
-    }
-    if (period === 'year') {
-      return d.getFullYear() === now.getFullYear();
-    }
+    if (!from && !to) return true;
+    const dateOnly = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (from && dateOnly < from) return false;
+    if (to && dateOnly > to) return false;
     return true;
   };
 
-  const filteredExpenses = expenses.filter((e) => isInPeriod(e.date, periodFilter));
-  const filteredRevenues = revenues.filter((r) => isInPeriod(r.date, periodFilter));
+  const filteredExpenses = expenses.filter((e) => isInDateRange(e.date, dateFrom, dateTo));
+  const filteredRevenues = revenues.filter((r) => isInDateRange(r.date, dateFrom, dateTo));
 
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + parseAmount(e.amount), 0);
   const totalRevenues = filteredRevenues.reduce((sum, r) => sum + parseAmount(r.amount), 0);
   const netAmount = totalRevenues - totalExpenses;
 
-  const periodLabel = { all: 'All time', week: 'This week', month: 'This month', year: 'This year' }[periodFilter] || periodFilter;
+  const periodLabel =
+    dateFrom && dateTo
+      ? `${dateFrom} to ${dateTo}`
+      : dateFrom
+      ? `From ${dateFrom}`
+      : dateTo
+      ? `Until ${dateTo}`
+      : 'All time';
+
+  const handlePrintReports = () => {
+    const printWindow = window.open('', '_blank', 'width=1000,height=700');
+    if (!printWindow) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Popup Blocked',
+        text: 'Please allow popups to print the report.',
+        confirmButtonColor: '#1a3a5f'
+      });
+      return;
+    }
+
+    const logoPath = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    const logoUrl = logoPath
+      ? (logoPath.startsWith('http') ? logoPath : window.location.origin + (logoPath.startsWith('/') ? logoPath : '/' + logoPath))
+      : window.location.origin + '/logo192.png';
+    const logoSrcForPrint = logoDataUrl || logoUrl;
+
+    const expensesTableHeader = `
+            <thead>
+              <tr>
+                <th class="tc">S.No</th>
+                <th class="tl">Date</th>
+                <th class="tl">Description</th>
+                <th class="tl">Category</th>
+                <th class="tr">Amount (TZS)</th>
+                <th class="tc">Status</th>
+              </tr>
+            </thead>`;
+    const expensesRows =
+      filteredExpenses.length === 0
+        ? '<tbody><tr><td colspan="6" style="text-align:center;padding:12px;">No expenses in this period</td></tr></tbody>'
+        : '<tbody>' +
+          filteredExpenses
+            .map((e, idx) => `
+              <tr>
+                <td class="tc">${idx + 1}</td>
+                <td class="tl">${formatDate(e.date)}</td>
+                <td class="tl">${(e.description || '—').replace(/</g, '&lt;')}</td>
+                <td class="tl">${(e.category || '—').replace(/</g, '&lt;')}</td>
+                <td class="tr">TZS ${formatCurrency(e.amount)}</td>
+                <td class="tc">${(e.status || '—').replace(/</g, '&lt;')}</td>
+              </tr>
+            `)
+            .join('') +
+          '</tbody>';
+
+    const revenuesTableHeader = `
+            <thead>
+              <tr>
+                <th class="tc">S.No</th>
+                <th class="tl">Date</th>
+                <th class="tl">Description</th>
+                <th class="tl">Category</th>
+                <th class="tr">Amount (TZS)</th>
+                <th class="tc">Payment method</th>
+                <th class="tc">Status</th>
+              </tr>
+            </thead>`;
+    const revenuesRows =
+      filteredRevenues.length === 0
+        ? '<tbody><tr><td colspan="7" style="text-align:center;padding:12px;">No revenues in this period</td></tr></tbody>'
+        : '<tbody>' +
+          filteredRevenues
+            .map((r, idx) => `
+              <tr>
+                <td class="tc">${idx + 1}</td>
+                <td class="tl">${formatDate(r.date)}</td>
+                <td class="tl">${(r.description || '—').replace(/</g, '&lt;')}</td>
+                <td class="tl">${(r.category || '—').replace(/</g, '&lt;')}</td>
+                <td class="tr">TZS ${formatCurrency(r.amount)}</td>
+                <td class="tc">${(r.payment_method || '—').replace(/</g, '&lt;')}</td>
+                <td class="tc">${(r.status || '—').replace(/</g, '&lt;')}</td>
+              </tr>
+            `)
+            .join('') +
+          '</tbody>';
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Expenses & Revenue Report - Mamuya Auto Spare Parts</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+              max-width: 900px;
+              margin: 0 auto;
+              padding: 24px;
+              color: #222;
+              font-size: 11px;
+              line-height: 1.4;
+            }
+            .tax-inv-top {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 24px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid #333;
+            }
+            .tax-inv-left {
+              display: flex;
+              align-items: flex-start;
+              gap: 20px;
+              flex: 1;
+            }
+            .tax-inv-logo {
+              max-height: 60px;
+              max-width: 140px;
+              object-fit: contain;
+            }
+            .tax-inv-company { flex: 1; }
+            .tax-inv-company h2 {
+              margin: 0 0 10px 0;
+              font-size: 1.15rem;
+              font-weight: 700;
+              color: #111;
+              letter-spacing: 0.02em;
+            }
+            .tax-inv-address { margin: 0; color: #444; font-size: 10px; line-height: 1.5; }
+            .tax-inv-meta { text-align: right; min-width: 180px; }
+            .tax-inv-meta p { margin: 0 0 6px 0; font-size: 11px; }
+            .tax-inv-title {
+              text-align: center;
+              font-size: 1.6rem;
+              font-weight: 700;
+              margin: 24px 0;
+              letter-spacing: 0.05em;
+            }
+            .tax-inv-section-title {
+              font-size: 1rem;
+              font-weight: 700;
+              margin: 20px 0 10px 0;
+              color: #111;
+            }
+            .tax-inv-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 0 0 20px 0;
+              font-size: 10px;
+              border: 1px solid #333;
+            }
+            .tax-inv-table th,
+            .tax-inv-table td {
+              border: 1px solid #333;
+              padding: 6px 8px;
+              vertical-align: middle;
+            }
+            .tax-inv-table th {
+              background: #f0f0f0;
+              font-weight: 700;
+              text-align: center;
+              font-size: 10px;
+            }
+            .tax-inv-table th.tl { text-align: left; }
+            .tax-inv-table .tc { text-align: center; }
+            .tax-inv-table .tr { text-align: right; }
+            .tax-inv-table .tl { text-align: left; }
+            .tax-inv-table tbody tr { background: #fff; }
+            .tax-inv-footer {
+              margin-top: 28px;
+              font-size: 11px;
+              border-top: 1px solid #ccc;
+              padding-top: 16px;
+            }
+            .tax-inv-footer-row { margin-bottom: 12px; }
+            .tax-inv-footer-row label { display: inline-block; min-width: 200px; font-weight: 600; }
+            .tax-inv-disclaimer {
+              margin-top: 28px;
+              font-style: italic;
+              color: #666;
+              font-size: 10px;
+            }
+            @media print { body { padding: 16px; } .tax-inv-logo { max-height: 52px; } }
+          </style>
+        </head>
+        <body>
+          <div class="tax-inv-top">
+            <div class="tax-inv-left">
+              <img src="${String(logoSrcForPrint).replace(/"/g, '&quot;')}" alt="Logo" class="tax-inv-logo" />
+              <div class="tax-inv-company">
+                <h2>Mamuya Auto Spare Parts</h2>
+                <p class="tax-inv-address">
+                  Kilimanjaro, Tanzania<br />
+                  Phone: +255 22 123 4567
+                </p>
+              </div>
+            </div>
+            <div class="tax-inv-meta">
+              <p><strong>Report:</strong> Expenses & Revenue</p>
+              <p><strong>Period:</strong> ${periodLabel}</p>
+              <p><strong>Printed:</strong> ${new Date().toLocaleString('en-GB')}</p>
+              <p><strong>Printed by:</strong> ${(user?.full_name || user?.username || 'Accountant').replace(/</g, '&lt;')}</p>
+            </div>
+          </div>
+
+          <h1 class="tax-inv-title">EXPENSES & REVENUE REPORT</h1>
+
+          <div class="tax-inv-section-title">Expenses</div>
+          <table class="tax-inv-table">
+            ${expensesTableHeader}
+            ${expensesRows}
+          </table>
+
+          <div class="tax-inv-section-title">Revenue</div>
+          <table class="tax-inv-table">
+            ${revenuesTableHeader}
+            ${revenuesRows}
+          </table>
+
+          <div class="tax-inv-footer">
+            <div class="tax-inv-footer-row"><label>Total Expenses (TZS):</label> ${formatCurrency(totalExpenses)}</div>
+            <div class="tax-inv-footer-row"><label>Total Revenue (TZS):</label> ${formatCurrency(totalRevenues)}</div>
+            <div class="tax-inv-footer-row"><label>Net (Revenue − Expenses) (TZS):</label> ${netAmount >= 0 ? formatCurrency(netAmount) : '- ' + formatCurrency(Math.abs(netAmount))}</div>
+          </div>
+
+          <p class="tax-inv-disclaimer">*This is a computer generated report, hence no signature is required.*</p>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
 
   if (loading || !user) {
     return (
@@ -157,6 +407,10 @@ function AccountantReports() {
           <Link to="/finance/accountant/transactions" className={'nav-item' + (location.pathname === '/finance/accountant/transactions' ? ' active' : '')}>
             <FaReceipt className="nav-icon" />
             <span>Transactions</span>
+          </Link>
+          <Link to="/finance/accountant/loans" className={'nav-item' + (location.pathname === '/finance/accountant/loans' ? ' active' : '')}>
+            <FaMoneyBillWave className="nav-icon" />
+            <span>Loans</span>
           </Link>
           <Link to="/finance/accountant/expenses" className={'nav-item' + (location.pathname === '/finance/accountant/expenses' ? ' active' : '')}>
             <FaArrowDown className="nav-icon" />
@@ -211,18 +465,65 @@ function AccountantReports() {
           <div className="reports-toolbar">
             <div className="filter-group">
               <FaFilter className="filter-icon" />
-              <select
+              <label className="filter-label">From</label>
+              <input
+                type="date"
                 className="filter-select reports-period-select"
-                value={periodFilter}
-                onChange={(e) => setPeriodFilter(e.target.value)}
-              >
-                <option value="all">All time</option>
-                <option value="week">This week</option>
-                <option value="month">This month</option>
-                <option value="year">This year</option>
-              </select>
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+                title="Filter from date"
+              />
             </div>
+            <div className="filter-group">
+              <label className="filter-label">To</label>
+              <input
+                type="date"
+                className="filter-select reports-period-select"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+                title="Filter to date"
+              />
+            </div>
+            {(dateFrom || dateTo) ? (
+              <div className="filter-group">
+                <button
+                  type="button"
+                  className="reports-clear-dates"
+                  onClick={() => { setDateFrom(''); setDateTo(''); }}
+                  title="Clear date filter"
+                >
+                  Clear dates
+                </button>
+              </div>
+            ) : null}
             <span className="reports-period-label">Showing: {periodLabel}</span>
+            <button
+              onClick={handlePrintReports}
+              className="action-btn print"
+              style={{
+                marginLeft: 'auto',
+                padding: '10px 20px',
+                backgroundColor: '#1a3a5f',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                fontWeight: '500',
+                transition: 'background-color 0.3s ease'
+              }}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#15304a'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = '#1a3a5f'}
+              title="Print Report"
+            >
+              <FaPrint />
+              <span>Print Report</span>
+            </button>
           </div>
 
           <div className="stats-grid reports-stats">
@@ -307,13 +608,14 @@ function AccountantReports() {
                       <th>Description</th>
                       <th>Category</th>
                       <th>Amount (TZS)</th>
+                      <th>Payment method</th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredRevenues.length === 0 ? (
                       <tr>
-                        <td colSpan="5" className="no-data">No revenues in this period</td>
+                        <td colSpan="6" className="no-data">No revenues in this period</td>
                       </tr>
                     ) : (
                       filteredRevenues.map((r) => (
@@ -322,6 +624,7 @@ function AccountantReports() {
                           <td className="reports-desc-cell">{r.description || '—'}</td>
                           <td><span className="reports-category-badge">{r.category || '—'}</span></td>
                           <td className="amount-positive">TZS {formatCurrency(r.amount)}</td>
+                          <td>{r.payment_method || '—'}</td>
                           <td><span className={`status-badge ${r.status === 'Approved' ? 'completed' : 'pending'}`}>{r.status || '—'}</span></td>
                         </tr>
                       ))

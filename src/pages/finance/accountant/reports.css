@@ -29,6 +29,31 @@
   min-width: 140px;
 }
 
+.reports-toolbar .filter-label {
+  font-size: 0.85rem;
+  color: #6c757d;
+  white-space: nowrap;
+}
+
+.reports-toolbar .reports-period-select[type="date"] {
+  cursor: pointer;
+}
+
+.reports-clear-dates {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  color: #1a3a5f;
+  background: transparent;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.reports-clear-dates:hover {
+  background: #f0f0f0;
+  border-color: #1a3a5f;
+}
+
 .reports-period-label {
   font-size: 0.9rem;
   color: #6c757d;

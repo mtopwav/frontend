@@ -34,10 +34,12 @@ function AccountantTransactions() {
   const [loading, setLoading] = useState(true);
   const [payments, setPayments] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [timeFilter, setTimeFilter] = useState('all');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('All');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [logoDataUrl, setLogoDataUrl] = useState(null);
 
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -76,7 +78,37 @@ function AccountantTransactions() {
     load();
   }, [navigate]);
 
-  const handleLogout = () => {
+  // Load logo as data URL for print document (match loans report)
+  useEffect(() => {
+    const logoSrc = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    if (!logoSrc) return;
+    const src = logoSrc.startsWith('http')
+      ? logoSrc
+      : window.location.origin + (logoSrc.startsWith('/') ? logoSrc : '/' + logoSrc);
+    fetch(src)
+      .then((r) => r.blob())
+      .then((blob) => {
+        const reader = new FileReader();
+        reader.onloadend = () => setLogoDataUrl(reader.result);
+        reader.readAsDataURL(blob);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -106,25 +138,14 @@ function AccountantTransactions() {
     });
   };
 
-  const isInTimeRange = (dateStr, range) => {
+  const isInDateRange = (dateStr, from, to) => {
     if (!dateStr) return false;
-    const d = new Date(dateStr).getTime();
-    const now = new Date();
-    if (range === 'all') return true;
-    if (range === 'today') {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      const end = start + 24 * 60 * 60 * 1000;
-      return d >= start && d < end;
-    }
-    if (range === 'week') {
-      const start = new Date(now);
-      start.setDate(start.getDate() - 7);
-      return d >= start.getTime();
-    }
-    if (range === 'month') {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-      return d >= start;
-    }
+    if (!from && !to) return true;
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return false;
+    const dateOnly = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (from && dateOnly < from) return false;
+    if (to && dateOnly > to) return false;
     return true;
   };
 
@@ -137,28 +158,81 @@ function AccountantTransactions() {
       (p.sparepart_name && p.sparepart_name.toLowerCase().includes(term)) ||
       (p.sparepart_number && p.sparepart_number?.toLowerCase().includes(term)) ||
       (p.items && p.items.some((i) => (i.sparepart_name || '').toLowerCase().includes(term) || (i.sparepart_number || '').toLowerCase().includes(term)));
-    const total = Number(p.total_amount) || 0;
-    const received = Number(p.amount_received) || 0;
-    const amountRemain = total - received;
-    const displayStatus =
-      p.status === 'Rejected' ? 'Rejected' : p.status === 'Approved' || amountRemain === 0 ? 'Approved' : 'Pending';
-    const matchesStatus = statusFilter === 'All' || displayStatus === statusFilter;
-    const matchesTime = isInTimeRange(p.created_at, timeFilter);
-    return matchesSearch && matchesStatus && matchesTime;
+    const matchesPaymentMethod =
+      paymentMethodFilter === 'All' ||
+      (p.payment_method || 'Unknown') === paymentMethodFilter;
+    const matchesTime = isInDateRange(p.created_at, dateFrom, dateTo);
+    return matchesSearch && matchesPaymentMethod && matchesTime;
   });
 
-  const totalAmount = filteredPayments.reduce((sum, p) => sum + (Number(p.total_amount) || 0), 0);
-  const approvedCount = filteredPayments.filter((p) => {
+  const uniquePaymentMethods = Array.from(
+    new Set(
+      payments
+        .map((p) => p.payment_method || 'Unknown')
+        .filter((m) => m && m.trim() !== '')
+    )
+  );
+
+  const isApprovedPayment = (p) => {
     const total = Number(p.total_amount) || 0;
     const received = Number(p.amount_received) || 0;
     return p.status === 'Approved' || (p.status === 'Pending' && total - received === 0);
-  }).length;
+  };
+
+  const totalAmount = filteredPayments.reduce((sum, p) => sum + (Number(p.total_amount) || 0), 0);
+  const approvedCount = filteredPayments.filter((p) => isApprovedPayment(p)).length;
   const pendingCount = filteredPayments.filter((p) => {
     const total = Number(p.total_amount) || 0;
     const received = Number(p.amount_received) || 0;
     return p.status === 'Pending' && total - received > 0;
   }).length;
   const rejectedCount = filteredPayments.filter((p) => p.status === 'Rejected').length;
+
+  // Only show approved transactions in the table
+  const approvedPaymentsForTable = filteredPayments.filter((p) => isApprovedPayment(p));
+
+  const totalAmountLabelByTime = () => {
+    if (dateFrom && dateTo) return `Total amount (${dateFrom} to ${dateTo})`;
+    if (dateFrom) return `Total amount (from ${dateFrom})`;
+    if (dateTo) return `Total amount (until ${dateTo})`;
+    return 'Total amount (all time)';
+  };
+
+  const getMethod = (p) => (p.payment_method || '').toLowerCase();
+
+  // Totals by payment method – use amount_received so cards show actual cash/bank/mobile received
+  const totalCash = approvedPaymentsForTable.reduce(
+    (sum, p) => (getMethod(p).includes('cash') ? sum + (Number(p.amount_received) || 0) : sum),
+    0
+  );
+
+  const totalBankTransfer = approvedPaymentsForTable.reduce(
+    (sum, p) =>
+      getMethod(p).includes('bank') || getMethod(p).includes('transfer')
+        ? sum + (Number(p.amount_received) || 0)
+        : sum,
+    0
+  );
+
+  const totalMobilePayments = approvedPaymentsForTable.reduce(
+    (sum, p) =>
+      getMethod(p).includes('mobile') ||
+      getMethod(p).includes('mpesa') ||
+      getMethod(p).includes('tigo') ||
+      getMethod(p).includes('airtel')
+        ? sum + (Number(p.amount_received) || 0)
+        : sum,
+    0
+  );
+
+  const totalAmountRemain = approvedPaymentsForTable.reduce((sum, p) => {
+    const total = Number(p.total_amount) || 0;
+    const received = Number(p.amount_received) || 0;
+    const remain = total - received;
+    return sum + Math.max(0, remain);
+  }, 0);
+
+  const totalAmountReceived = totalCash + totalBankTransfer + totalMobilePayments;
 
   const getStatusClass = (status) => {
     if (status === 'Approved') return 'approved';
@@ -169,6 +243,207 @@ function AccountantTransactions() {
   const handleView = (payment) => {
     setSelectedPayment(payment);
     setShowViewModal(true);
+  };
+
+  const handlePrint = () => {
+    const reportWindow = window.open('', '_blank', 'width=1000,height=700');
+    if (!reportWindow) return;
+
+    const logoPath = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    const logoUrl = logoPath
+      ? (logoPath.startsWith('http') ? logoPath : window.location.origin + (logoPath.startsWith('/') ? logoPath : '/' + logoPath))
+      : window.location.origin + '/logo192.png';
+    const logoSrcForPrint = logoDataUrl || logoUrl;
+
+    const dateRangeLabel =
+      dateFrom && dateTo
+        ? `${dateFrom} to ${dateTo}`
+        : dateFrom
+        ? `From ${dateFrom}`
+        : dateTo
+        ? `Until ${dateTo}`
+        : 'All time';
+
+    const tableHeader = `
+            <thead>
+              <tr>
+                <th class="tc">S.No</th>
+                <th class="tl">Date</th>
+                <th class="tl">Customer</th>
+                <th class="tl">Items</th>
+                <th class="tc">Payment method</th>
+                <th class="tr">Total (TZS)</th>
+                <th class="tr">Received (TZS)</th>
+                <th class="tr">Remain (TZS)</th>
+              </tr>
+            </thead>`;
+
+    const rowsHtml =
+      approvedPaymentsForTable.length === 0
+        ? '<tbody><tr><td colspan="8" style="text-align:center;padding:12px;">No approved transactions found</td></tr></tbody>'
+        : '<tbody>' +
+          approvedPaymentsForTable
+            .map((p, idx) => {
+              const total = Number(p.total_amount) || 0;
+              const received = Number(p.amount_received) || 0;
+              const amountRemain = total - received;
+              const items =
+                p.items && p.items.length > 0
+                  ? p.items
+                      .map((item) => (item.sparepart_name || 'Unknown').replace(/</g, '&lt;'))
+                      .join('<br />')
+                  : (p.sparepart_name || '—').replace(/</g, '&lt;');
+              return `
+                <tr>
+                  <td class="tc">${idx + 1}</td>
+                  <td class="tl">${formatDateTime(p.created_at)}</td>
+                  <td class="tl">${(p.customer_name || '—').toUpperCase().replace(/</g, '&lt;')}</td>
+                  <td class="tl">${items}</td>
+                  <td class="tc">${(p.payment_method || '—').replace(/</g, '&lt;')}</td>
+                  <td class="tr">${formatPrice(total)}</td>
+                  <td class="tr">${formatPrice(received)}</td>
+                  <td class="tr">${formatPrice(Math.max(0, amountRemain))}</td>
+                </tr>
+              `;
+            })
+            .join('') +
+          '</tbody>';
+
+    reportWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Transactions Report - Mamuya Auto Spare Parts</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+              max-width: 900px;
+              margin: 0 auto;
+              padding: 24px;
+              color: #222;
+              font-size: 11px;
+              line-height: 1.4;
+            }
+            .tax-inv-top {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 24px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid #333;
+            }
+            .tax-inv-left {
+              display: flex;
+              align-items: flex-start;
+              gap: 20px;
+              flex: 1;
+            }
+            .tax-inv-logo {
+              max-height: 60px;
+              max-width: 140px;
+              object-fit: contain;
+            }
+            .tax-inv-company { flex: 1; }
+            .tax-inv-company h2 {
+              margin: 0 0 10px 0;
+              font-size: 1.15rem;
+              font-weight: 700;
+              color: #111;
+              letter-spacing: 0.02em;
+            }
+            .tax-inv-address { margin: 0; color: #444; font-size: 10px; line-height: 1.5; }
+            .tax-inv-meta { text-align: right; min-width: 180px; }
+            .tax-inv-meta p { margin: 0 0 6px 0; font-size: 11px; }
+            .tax-inv-title {
+              text-align: center;
+              font-size: 1.6rem;
+              font-weight: 700;
+              margin: 24px 0;
+              letter-spacing: 0.05em;
+            }
+            .tax-inv-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 0 0 20px 0;
+              font-size: 10px;
+              border: 1px solid #333;
+            }
+            .tax-inv-table th,
+            .tax-inv-table td {
+              border: 1px solid #333;
+              padding: 6px 8px;
+              vertical-align: middle;
+            }
+            .tax-inv-table th {
+              background: #f0f0f0;
+              font-weight: 700;
+              text-align: center;
+              font-size: 10px;
+            }
+            .tax-inv-table th.tl { text-align: left; }
+            .tax-inv-table .tc { text-align: center; }
+            .tax-inv-table .tr { text-align: right; }
+            .tax-inv-table .tl { text-align: left; }
+            .tax-inv-table tbody tr { background: #fff; }
+            .tax-inv-footer {
+              margin-top: 28px;
+              font-size: 11px;
+              border-top: 1px solid #ccc;
+              padding-top: 16px;
+            }
+            .tax-inv-footer-row { margin-bottom: 12px; }
+            .tax-inv-footer-row label { display: inline-block; min-width: 200px; font-weight: 600; }
+            .tax-inv-disclaimer {
+              margin-top: 28px;
+              font-style: italic;
+              color: #666;
+              font-size: 10px;
+            }
+            @media print { body { padding: 16px; } .tax-inv-logo { max-height: 52px; } }
+          </style>
+        </head>
+        <body>
+          <div class="tax-inv-top">
+            <div class="tax-inv-left">
+              <img src="${String(logoSrcForPrint).replace(/"/g, '&quot;')}" alt="Logo" class="tax-inv-logo" />
+              <div class="tax-inv-company">
+                <h2>Mamuya Auto Spare Parts</h2>
+                <p class="tax-inv-address">
+                  Kilimanjaro, Tanzania<br />
+                  Phone: +255 22 123 4567
+                </p>
+              </div>
+            </div>
+            <div class="tax-inv-meta">
+              <p><strong>Report:</strong> Transactions (Approved)</p>
+              <p><strong>Period:</strong> ${dateRangeLabel}</p>
+              <p><strong>Printed:</strong> ${new Date().toLocaleString('en-GB')}</p>
+              <p><strong>Printed by:</strong> ${(user?.full_name || user?.username || 'Accountant').replace(/</g, '&lt;')}</p>
+            </div>
+          </div>
+
+          <h1 class="tax-inv-title">TRANSACTIONS REPORT</h1>
+
+          <table class="tax-inv-table">
+            ${tableHeader}
+            ${rowsHtml}
+          </table>
+
+          <div class="tax-inv-footer">
+            <div class="tax-inv-footer-row"><label>Total Cash (TZS):</label> ${formatPrice(totalCash)}</div>
+            <div class="tax-inv-footer-row"><label>Total Bank transfer (TZS):</label> ${formatPrice(totalBankTransfer)}</div>
+            <div class="tax-inv-footer-row"><label>Total Mobile payments (TZS):</label> ${formatPrice(totalMobilePayments)}</div>
+          </div>
+
+          <p class="tax-inv-disclaimer">*This is a computer generated transactions report, hence no signature is required.*</p>
+        </body>
+      </html>
+    `);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
   };
 
   if (loading || !user) {
@@ -194,6 +469,10 @@ function AccountantTransactions() {
           <Link to="/finance/accountant/transactions" className={'nav-item' + (location.pathname === '/finance/accountant/transactions' ? ' active' : '')}>
             <FaReceipt className="nav-icon" />
             <span>Transactions</span>
+          </Link>
+          <Link to="/finance/accountant/loans" className={'nav-item' + (location.pathname === '/finance/accountant/loans' ? ' active' : '')}>
+            <FaMoneyBillWave className="nav-icon" />
+            <span>Loans</span>
           </Link>
           <Link to="/finance/accountant/expenses" className={'nav-item' + (location.pathname === '/finance/accountant/expenses' ? ' active' : '')}>
             <FaArrowDown className="nav-icon" />
@@ -257,16 +536,34 @@ function AccountantTransactions() {
                 <p className="stat-value">{approvedCount}</p>
               </div>
             </div>
-            <div className="stat-card stat-info">
+            <div className="stat-card stat-primary">
               <div className="stat-info">
-                <h3 className="stat-title">Pending</h3>
-                <p className="stat-value">{pendingCount}</p>
+                <h3 className="stat-title">Total Amount Received</h3>
+                <p className="stat-value">TZS {formatPrice(totalAmountReceived)}</p>
               </div>
             </div>
-            <div className="stat-card stat-danger">
+            <div className="stat-card stat-warning">
               <div className="stat-info">
-                <h3 className="stat-title">Rejected</h3>
-                <p className="stat-value">{rejectedCount}</p>
+                <h3 className="stat-title">Loans</h3>
+                <p className="stat-value">TZS {formatPrice(totalAmountRemain)}</p>
+              </div>
+            </div>
+            <div className="stat-card stat-info">
+              <div className="stat-info">
+                <h3 className="stat-title">Cash</h3>
+                <p className="stat-value">TZS {formatPrice(totalCash)}</p>
+              </div>
+            </div>
+            <div className="stat-card stat-primary">
+              <div className="stat-info">
+                <h3 className="stat-title">Bank Transfer</h3>
+                <p className="stat-value">TZS {formatPrice(totalBankTransfer)}</p>
+              </div>
+            </div>
+            <div className="stat-card stat-success">
+              <div className="stat-info">
+                <h3 className="stat-title">Mobile Payments</h3>
+                <p className="stat-value">TZS {formatPrice(totalMobilePayments)}</p>
               </div>
             </div>
           </div>
@@ -277,21 +574,53 @@ function AccountantTransactions() {
               <div className="section-actions">
                 <div className="filter-group">
                   <FaFilter className="filter-icon" />
-                  <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                    <option value="All">All Status</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Approved">Approved</option>
-                    <option value="Rejected">Rejected</option>
+                  <select
+                    className="filter-select"
+                    value={paymentMethodFilter}
+                    onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                  >
+                    <option value="All">All payment methods</option>
+                    {uniquePaymentMethods.map((method) => (
+                      <option key={method} value={method}>
+                        {method}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="filter-group">
-                  <select className="filter-select" value={timeFilter} onChange={(e) => setTimeFilter(e.target.value)}>
-                    <option value="all">All time</option>
-                    <option value="today">Today</option>
-                    <option value="week">Last 7 days</option>
-                    <option value="month">Last 30 days</option>
-                  </select>
+                  <label className="filter-label">From</label>
+                  <input
+                    type="date"
+                    className="filter-select"
+                    value={dateFrom}
+                    max={dateTo || undefined}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    title="Filter from date"
+                  />
                 </div>
+                <div className="filter-group">
+                  <label className="filter-label">To</label>
+                  <input
+                    type="date"
+                    className="filter-select"
+                    value={dateTo}
+                    min={dateFrom || undefined}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    title="Filter to date"
+                  />
+                </div>
+                {(dateFrom || dateTo) ? (
+                  <div className="filter-group">
+                    <button
+                      type="button"
+                      className="filter-clear-dates"
+                      onClick={() => { setDateFrom(''); setDateTo(''); }}
+                      title="Clear date filter"
+                    >
+                      Clear dates
+                    </button>
+                  </div>
+                ) : null}
                 <div className="search-box">
                   <FaSearch className="search-icon" />
                   <input
@@ -302,6 +631,9 @@ function AccountantTransactions() {
                     className="search-input"
                   />
                 </div>
+                <button type="button" className="action-btn" onClick={handlePrint}>
+                  Print Transactions
+                </button>
               </div>
             </div>
 
@@ -309,6 +641,8 @@ function AccountantTransactions() {
               <table className="transactions-table">
                 <thead>
                   <tr>
+                    <th>S.No</th>
+                    <th>Date</th>
                     <th>Customer</th>
                     <th>Items</th>
                     <th>Total (TZS)</th>
@@ -316,19 +650,18 @@ function AccountantTransactions() {
                     <th>Received</th>
                     <th>Remain</th>
                     <th>Status</th>
-                    <th>Date</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPayments.length === 0 ? (
+                  {approvedPaymentsForTable.length === 0 ? (
                     <tr>
-                      <td colSpan="9" className="no-data">
-                        No transactions found
+                      <td colSpan="10" className="no-data">
+                        No approved transactions found
                       </td>
                     </tr>
                   ) : (
-                    filteredPayments.map((payment) => {
+                    approvedPaymentsForTable.map((payment, index) => {
                       const total = Number(payment.total_amount) || 0;
                       const received = Number(payment.amount_received) || 0;
                       const amountRemain = total - received;
@@ -340,6 +673,8 @@ function AccountantTransactions() {
                           : 'Pending';
                       return (
                         <tr key={payment.id}>
+                          <td>{index + 1}</td>
+                          <td>{formatDateTime(payment.created_at)}</td>
                           <td>
                             <div className="txn-customer-cell">
                               <div className="txn-name">{capitalizeName(payment.customer_name)}</div>
@@ -350,7 +685,11 @@ function AccountantTransactions() {
                           </td>
                           <td>
                             {payment.items && payment.items.length > 0 ? (
-                              <span>{payment.items.length} item(s)</span>
+                              <span>
+                                {payment.items
+                                  .map((item) => capitalizeName(item.sparepart_name || 'Unknown'))
+                                  .join(', ')}
+                              </span>
                             ) : (
                               <span>{capitalizeName(payment.sparepart_name || '—')}</span>
                             )}
@@ -371,7 +710,6 @@ function AccountantTransactions() {
                               {displayStatus}
                             </span>
                           </td>
-                          <td>{formatDateTime(payment.created_at)}</td>
                           <td>
                             <div className="action-buttons">
                               <button className="action-btn view" title="View" onClick={() => handleView(payment)}>
@@ -385,11 +723,6 @@ function AccountantTransactions() {
                   )}
                 </tbody>
               </table>
-            </div>
-
-            <div className="transactions-total-card">
-              <span className="transactions-total-label">Total amount (filtered)</span>
-              <span className="transactions-total-value">TZS {formatPrice(totalAmount)}</span>
             </div>
           </div>
         </div>

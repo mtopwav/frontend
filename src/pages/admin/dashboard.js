@@ -23,6 +23,7 @@ import ThemeToggle from '../../components/ThemeToggle';
 import LanguageSelector from '../../components/LanguageSelector';
 import { getUnviewedOperationsCount } from '../../utils/notifications';
 import { getPayments, getSpareParts, getCustomers } from '../../services/api';
+import Swal from 'sweetalert2';
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -44,6 +45,8 @@ function Dashboard() {
   const [recentActivities, setRecentActivities] = useState([]);
   const [todaySalesCount, setTodaySalesCount] = useState(0);
   const [todayPendingOrdersCount, setTodayPendingOrdersCount] = useState(0);
+  const [totalWholesaleValue, setTotalWholesaleValue] = useState(0);
+  const [totalRetailValue, setTotalRetailValue] = useState(0);
 
   useEffect(() => {
     // Get user data from storage
@@ -135,7 +138,8 @@ function Dashboard() {
           
           const salesTotal = todayApprovedPayments.reduce(
             (sum, p) => {
-              const amount = parseFloat(p.total_amount) || 0;
+              // Use amount_received when available; fallback to total_amount
+              const amount = parseFloat(p.amount_received ?? p.total_amount) || 0;
               return sum + amount;
             },
             0
@@ -171,7 +175,8 @@ function Dashboard() {
           
           const yesterdaySalesTotal = yesterdayApprovedPayments.reduce(
             (sum, p) => {
-              const amount = parseFloat(p.total_amount) || 0;
+              // Use amount_received when available; fallback to total_amount
+              const amount = parseFloat(p.amount_received ?? p.total_amount) || 0;
               return sum + amount;
             },
             0
@@ -199,13 +204,31 @@ function Dashboard() {
     };
     fetchPayments();
 
-    // Fetch spare parts to count total parts
+    // Fetch spare parts to count total parts and total wholesale/retail values
     const fetchSpareParts = async () => {
       try {
         const response = await getSpareParts();
         if (response.success && response.spareParts) {
+          const spareParts = response.spareParts;
+
           // Count total spare parts
-          setTotalParts(response.spareParts.length);
+          setTotalParts(spareParts.length);
+
+          // Calculate total wholesale and retail inventory values (price × quantity)
+          const wholesaleTotal = spareParts.reduce((sum, part) => {
+            const qty = Number(part.quantity) || 0;
+            const price = Number(part.wholesale_price ?? part.wholesalePrice) || 0;
+            return sum + qty * price;
+          }, 0);
+
+          const retailTotal = spareParts.reduce((sum, part) => {
+            const qty = Number(part.quantity) || 0;
+            const price = Number(part.retail_price ?? part.retailPrice) || 0;
+            return sum + qty * price;
+          }, 0);
+
+          setTotalWholesaleValue(wholesaleTotal);
+          setTotalRetailValue(retailTotal);
           
           // Calculate last week's parts count (parts created before 7 days ago)
           const today = new Date();
@@ -213,7 +236,7 @@ function Dashboard() {
           const lastWeek = new Date(today);
           lastWeek.setDate(lastWeek.getDate() - 7);
           
-          const lastWeekPartsCount = response.spareParts.filter(part => {
+          const lastWeekPartsCount = spareParts.filter(part => {
             if (!part.created_at && !part.date_added) return false;
             const partDate = new Date(part.created_at || part.date_added);
             partDate.setHours(0, 0, 0, 0);
@@ -224,6 +247,8 @@ function Dashboard() {
       } catch (error) {
         console.error('Error fetching spare parts:', error);
         setTotalParts(0);
+        setTotalWholesaleValue(0);
+        setTotalRetailValue(0);
         setLastWeekParts(0);
       }
     };
@@ -392,7 +417,20 @@ function Dashboard() {
     );
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: t.logout || 'Logout',
+      text: t.areYouSureLogout || 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: t.yesLogout || 'Yes, logout',
+      cancelButtonText: t.cancel || 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -430,6 +468,9 @@ function Dashboard() {
   const ordersChange = calculatePercentageChange(totalOrders, lastWeekOrders);
   const customersChange = calculatePercentageChange(totalCustomers, lastWeekCustomers);
 
+  // For total wholesale/retail inventory values, just show a neutral change indicator
+  const inventoryChange = { value: '—', isPositive: true };
+
   // Dashboard statistics
   const stats = [
     {
@@ -463,6 +504,22 @@ function Dashboard() {
       changePositive: customersChange.isPositive,
       icon: <FaUsers />,
       color: 'warning'
+    },
+    {
+      title: t.totalWholesaleValue || 'Total Wholesale Value',
+      value: formatCurrency(totalWholesaleValue),
+      change: inventoryChange.value,
+      changePositive: inventoryChange.isPositive,
+      icon: <FaMoneyBillAlt />,
+      color: 'secondary'
+    },
+    {
+      title: t.totalRetailValue || 'Total Retail Value',
+      value: formatCurrency(totalRetailValue),
+      change: inventoryChange.value,
+      changePositive: inventoryChange.isPositive,
+      icon: <FaMoneyBillAlt />,
+      color: 'secondary'
     }
   ];
 

@@ -23,6 +23,7 @@ import ThemeToggle from '../../components/ThemeToggle';
 import LanguageSelector from '../../components/LanguageSelector';
 import { getUnviewedOperationsCount, markAllOperationsAsViewed } from '../../utils/notifications';
 import { useTranslation } from '../../utils/useTranslation';
+import Swal from 'sweetalert2';
 
 function SalesDashboard() {
   const navigate = useNavigate();
@@ -212,7 +213,20 @@ function SalesDashboard() {
     );
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: t.logout || 'Logout',
+      text: t.areYouSureLogout || 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: t.yesLogout || 'Yes, logout',
+      cancelButtonText: t.cancel || 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');

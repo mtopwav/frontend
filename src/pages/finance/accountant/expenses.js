@@ -95,7 +95,20 @@ function AccountantExpenses() {
     loadExpenses();
   }, [navigate]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -128,6 +141,21 @@ function AccountantExpenses() {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return null;
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+
+  const getMinAllowedDate = () => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30);
+    return date.toISOString().slice(0, 10);
+  };
+
+  const isPastDate = (dateStr) => {
+    const d = toDateOnly(dateStr);
+    if (d == null) return false;
+    const minDate = new Date();
+    minDate.setDate(minDate.getDate() - 30);
+    const minDateOnly = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate()).getTime();
+    return d < minDateOnly;
   };
 
   const isInPeriod = (dateStr, period) => {
@@ -197,6 +225,15 @@ function AccountantExpenses() {
 
   const handleAddExpense = async (e) => {
     e.preventDefault();
+    if (isPastDate(addForm.date)) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Invalid date',
+        text: 'Date cannot be more than 30 days before today. Please select a date from 30 days ago onwards.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
     const amountNum = parseFloat(String(addForm.amount).replace(/,/g, ''), 10);
     if (!addForm.description.trim() || Number.isNaN(amountNum) || amountNum <= 0) return;
     setSubmitting(true);
@@ -235,7 +272,10 @@ function AccountantExpenses() {
   };
 
   const openEditModal = (exp) => {
-    const dateStr = exp.date ? (typeof exp.date === 'string' && exp.date.length >= 10 ? exp.date.slice(0, 10) : new Date(exp.date).toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10);
+    let dateStr = exp.date ? (typeof exp.date === 'string' && exp.date.length >= 10 ? exp.date.slice(0, 10) : new Date(exp.date).toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10);
+    if (isPastDate(dateStr)) {
+      dateStr = getMinAllowedDate();
+    }
     setEditingExpense(exp);
     setEditForm({
       description: exp.description || '',
@@ -255,6 +295,15 @@ function AccountantExpenses() {
   const handleEditExpense = async (e) => {
     e.preventDefault();
     if (!editingExpense) return;
+    if (isPastDate(editForm.date)) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Invalid date',
+        text: 'Date cannot be more than 30 days before today. Please select a date from 30 days ago onwards.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
     const amountNum = parseFloat(String(editForm.amount).replace(/,/g, ''), 10);
     if (!editForm.description.trim() || Number.isNaN(amountNum) || amountNum <= 0) return;
     setSubmitting(true);
@@ -315,6 +364,10 @@ function AccountantExpenses() {
           <Link to="/finance/accountant/transactions" className={'nav-item' + (location.pathname === '/finance/accountant/transactions' ? ' active' : '')}>
             <FaReceipt className="nav-icon" />
             <span>Transactions</span>
+          </Link>
+          <Link to="/finance/accountant/loans" className={'nav-item' + (location.pathname === '/finance/accountant/loans' ? ' active' : '')}>
+            <FaMoneyBillWave className="nav-icon" />
+            <span>Loans</span>
           </Link>
           <Link to="/finance/accountant/expenses" className={'nav-item' + (location.pathname === '/finance/accountant/expenses' ? ' active' : '')}>
             <FaArrowDown className="nav-icon" />
@@ -579,7 +632,7 @@ function AccountantExpenses() {
                 <input
                   id="add-date"
                   type="date"
-                  min={new Date().toISOString().slice(0, 10)}
+                  min={getMinAllowedDate()}
                   value={addForm.date}
                   onChange={(e) => setAddForm((f) => ({ ...f, date: e.target.value }))}
                   className="expenses-form-input"
@@ -661,6 +714,7 @@ function AccountantExpenses() {
                 <input
                   id="edit-date"
                   type="date"
+                  min={getMinAllowedDate()}
                   value={editForm.date}
                   onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))}
                   className="expenses-form-input"

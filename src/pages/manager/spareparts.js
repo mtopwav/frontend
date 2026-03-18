@@ -17,6 +17,7 @@ import {
   FaEye,
   FaEdit,
   FaPlus,
+  FaTrashAlt,
   FaCalendarAlt,
 } from 'react-icons/fa';
 import '../sales/payments.css';
@@ -30,6 +31,7 @@ import {
   getBrands,
   addSparePart,
   updateSparePart,
+  deleteSparePart,
 } from '../../services/api';
 import { getCurrentDateTime } from '../../utils/dateTime';
 import { useTranslation } from '../../utils/useTranslation';
@@ -51,10 +53,8 @@ function ManagerSpareparts() {
   const [brands, setBrands] = useState([]);
   const [selectedPart, setSelectedPart] = useState(null);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editPart, setEditPart] = useState(null);
-  const [quantityToAdd, setQuantityToAdd] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [addForm, setAddForm] = useState({
     part_name: '',
@@ -140,7 +140,20 @@ function ManagerSpareparts() {
     return () => clearInterval(t);
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -185,7 +198,9 @@ function ManagerSpareparts() {
     return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const categoryFilterOptions = [...new Set(spareParts.map((p) => p.category_name).filter(Boolean))].sort();
+  const categoryFilterOptions = [
+    ...new Set(spareParts.map((p) => p.category_name).filter(Boolean)),
+  ].sort((a, b) => String(a).toLowerCase().localeCompare(String(b).toLowerCase()));
 
   const filteredParts = spareParts.filter((p) => {
     const term = searchTerm.toLowerCase();
@@ -198,43 +213,15 @@ function ManagerSpareparts() {
     return matchesSearch && matchesCategory;
   });
 
+  const sortedParts = [...filteredParts].sort((a, b) =>
+    String(a.part_name || '').toLowerCase().localeCompare(String(b.part_name || '').toLowerCase())
+  );
+
   const totalParts = spareParts.length;
   const lowStockCount = spareParts.filter((p) => (Number(p.quantity) || 0) < LOW_STOCK_THRESHOLD).length;
   const handleView = (part) => {
     setSelectedPart(part);
     setShowViewModal(true);
-  };
-
-  const handleEdit = (part) => {
-    setEditPart(part);
-    setQuantityToAdd('');
-    setShowEditModal(true);
-  };
-
-  const handleEditSubmit = async (e) => {
-    e.preventDefault();
-    if (!editPart) return;
-    const addQty = parseInt(quantityToAdd, 10);
-    if (Number.isNaN(addQty) || addQty < 0) {
-      Swal.fire({ icon: 'warning', title: 'Invalid', text: 'Quantity to add must be a valid number (≥ 0).', confirmButtonColor: '#1a3a5f' });
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const response = await updateSparePart(editPart.id, { quantity_to_add: addQty });
-      if (response.success && response.sparePart) {
-        setSpareParts((prev) => prev.map((p) => (p.id === editPart.id ? response.sparePart : p)));
-        setShowEditModal(false);
-        setEditPart(null);
-        Swal.fire({ icon: 'success', title: 'Updated', text: 'Spare part quantity updated.', confirmButtonColor: '#1a3a5f' });
-      } else {
-        throw new Error(response.message || 'Update failed');
-      }
-    } catch (error) {
-      Swal.fire({ icon: 'error', title: 'Error', text: error.message || 'Failed to update spare part.', confirmButtonColor: '#1a3a5f' });
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   const openAddModal = () => {
@@ -249,7 +236,68 @@ function ManagerSpareparts() {
       location: '',
       supplier: 'Mamuya Auto Spare Parts',
     });
+    setEditingId(null);
     setShowAddModal(true);
+  };
+
+  const openEditRowModal = (part) => {
+    setAddForm({
+      part_name: part.part_name || '',
+      part_number: part.part_number || '',
+      category_id: part.category_id || '',
+      brand_id: part.brand_id || '',
+      quantity: part.quantity != null ? String(part.quantity) : '',
+      wholesale_price: part.wholesale_price != null ? String(part.wholesale_price) : '',
+      retail_price: part.retail_price != null ? String(part.retail_price) : '',
+      location: part.location || '',
+      supplier: part.supplier || 'Mamuya Auto Spare Parts',
+    });
+    setEditingId(part.id);
+    setShowAddModal(true);
+  };
+
+  const handleDelete = async (part) => {
+    const result = await Swal.fire({
+      icon: 'warning',
+      title: 'Delete spare part?',
+      html: `Are you sure you want to delete <strong>${(part.part_name || '').replace(/</g, '&lt;')}</strong> (${(part.part_number || '').replace(/</g, '&lt;')})? This cannot be undone.`,
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, delete',
+      cancelButtonText: 'Cancel',
+    });
+    if (!result.isConfirmed) return;
+    try {
+      const response = await deleteSparePart(part.id);
+      if (response.success) {
+        setSpareParts((prev) => prev.filter((p) => p.id !== part.id));
+        if (selectedPart && selectedPart.id === part.id) {
+          setShowViewModal(false);
+          setSelectedPart(null);
+        }
+        if (editingId === part.id) {
+          setShowAddModal(false);
+          setEditingId(null);
+        }
+        Swal.fire({
+          icon: 'success',
+          title: 'Deleted',
+          text: 'Spare part deleted successfully.',
+          confirmButtonColor: '#1a3a5f',
+        });
+      } else {
+        throw new Error(response.message || 'Failed to delete spare part');
+      }
+    } catch (error) {
+      console.error('Error deleting spare part:', error);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: error.message || 'Failed to delete spare part.',
+        confirmButtonColor: '#1a3a5f',
+      });
+    }
   };
 
   const handleAddSpare = async (e) => {
@@ -283,7 +331,7 @@ function ManagerSpareparts() {
     }
     setSubmitting(true);
     try {
-      const response = await addSparePart({
+      const payload = {
         part_name: addForm.part_name.trim(),
         part_number: addForm.part_number.trim(),
         category_id: parseInt(addForm.category_id, 10),
@@ -294,18 +342,34 @@ function ManagerSpareparts() {
         status: 'Active',
         location: addForm.location.trim(),
         supplier: addForm.supplier.trim() || 'Mamuya Auto Spare Parts',
-      });
+      };
+
+      let response;
+      if (editingId) {
+        // Full-row update of existing spare part
+        response = await updateSparePart(editingId, payload);
+      } else {
+        // Create new spare part
+        response = await addSparePart(payload);
+      }
+
       if (response.success && response.sparePart) {
-        setSpareParts((prev) => [response.sparePart, ...prev]);
+        setSpareParts((prev) => {
+          if (editingId) {
+            return prev.map((p) => (p.id === editingId ? response.sparePart : p));
+          }
+          return [response.sparePart, ...prev];
+        });
         setShowAddModal(false);
+        setEditingId(null);
         Swal.fire({
           icon: 'success',
           title: 'Success',
-          text: 'Spare part added successfully.',
+          text: editingId ? 'Spare part updated successfully.' : 'Spare part added successfully.',
           confirmButtonColor: '#1a3a5f',
         });
       } else {
-        throw new Error(response.message || 'Failed to add spare part');
+        throw new Error(response.message || 'Failed to save spare part');
       }
     } catch (error) {
       console.error('Error adding spare part:', error);
@@ -476,22 +540,22 @@ function ManagerSpareparts() {
                         {t.loadingSpareParts}
                       </td>
                     </tr>
-                  ) : filteredParts.length === 0 ? (
+                  ) : sortedParts.length === 0 ? (
                     <tr>
                       <td colSpan="8" className="no-data">
                         No spare parts found
                       </td>
                     </tr>
                   ) : (
-                    filteredParts.map((p) => {
+                    sortedParts.map((p) => {
                       const qty = Number(p.quantity) || 0;
                       const isLowStock = qty < LOW_STOCK_THRESHOLD;
                       return (
                         <tr key={p.id}>
                           <td>{capitalizeName(p.part_name)}</td>
-                          <td>{capitalizeName(p.part_number) || '—'}</td>
+                          <td>{(p.part_number || '—').toUpperCase()}</td>
                           <td>{capitalizeName(p.category_name) || '—'}</td>
-                          <td>{capitalizeName(p.brand_name) || '—'}</td>
+                          <td>{(p.brand_name || '—').toUpperCase()}</td>
                           <td>
                             <span className={isLowStock ? 'manager-qty-low' : ''}>{qty}</span>
                           </td>
@@ -502,8 +566,11 @@ function ManagerSpareparts() {
                               <button className="action-btn view" title={t.view} onClick={() => handleView(p)}>
                                 <FaEye />
                               </button>
-                              <button className="action-btn edit" title="Edit" onClick={() => handleEdit(p)}>
+                              <button className="action-btn edit" title="Edit row" onClick={() => openEditRowModal(p)}>
                                 <FaEdit />
+                              </button>
+                              <button className="action-btn delete" title="Delete" onClick={() => handleDelete(p)}>
+                                <FaTrashAlt />
                               </button>
                             </div>
                           </td>
@@ -534,7 +601,7 @@ function ManagerSpareparts() {
               </div>
               <div className="manager-view-row">
                 <label>Part Number</label>
-                <span>{capitalizeName(selectedPart.part_number) || '—'}</span>
+                <span>{(selectedPart.part_number || '—').toUpperCase()}</span>
               </div>
               <div className="manager-view-row">
                 <label>{t.category}</label>
@@ -542,7 +609,7 @@ function ManagerSpareparts() {
               </div>
               <div className="manager-view-row">
                 <label>{t.brand}</label>
-                <span>{capitalizeName(selectedPart.brand_name) || '—'}</span>
+                <span>{(selectedPart.brand_name || '—').toUpperCase()}</span>
               </div>
               <div className="manager-view-row">
                 <label>Quantity</label>
@@ -590,51 +657,11 @@ function ManagerSpareparts() {
         </div>
       )}
 
-      {showEditModal && editPart && (
-        <div className="manager-modal-overlay" onClick={() => setShowEditModal(false)}>
-          <div className="manager-modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="manager-modal-header">
-              <h3>{t.editSparePart}</h3>
-              <button type="button" className="manager-modal-close" onClick={() => setShowEditModal(false)}>×</button>
-            </div>
-            <form onSubmit={handleEditSubmit}>
-              <div className="manager-modal-body">
-                <div className="manager-view-row">
-                  <label>Part</label>
-                  <span>{capitalizeName(editPart.part_name)} ({editPart.part_number || '—'})</span>
-                </div>
-                <div className="manager-view-row">
-                  <label>{t.currentQuantity}</label>
-                  <span>{editPart.quantity ?? '—'}</span>
-                </div>
-                <div className="manager-form-group">
-                  <label>Quantity to add</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={quantityToAdd}
-                    onChange={(e) => setQuantityToAdd(e.target.value)}
-                    className="manager-form-input"
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-              <div className="manager-modal-footer">
-                <button type="button" className="manager-modal-btn secondary" onClick={() => setShowEditModal(false)}>{t.cancel}</button>
-                <button type="submit" className="manager-modal-btn primary" disabled={submitting}>
-                  {submitting ? t.updating : t.update}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {showAddModal && (
         <div className="manager-modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="manager-modal-content manager-add-spare-modal" onClick={(e) => e.stopPropagation()}>
             <div className="manager-modal-header">
-              <h3>Add spare part</h3>
+              <h3>{editingId ? 'Edit spare part' : 'Add spare part'}</h3>
               <button type="button" className="manager-modal-close" onClick={() => setShowAddModal(false)}>×</button>
             </div>
             <form onSubmit={handleAddSpare} className="manager-add-spare-form">
@@ -670,9 +697,11 @@ function ManagerSpareparts() {
                     className="manager-form-input"
                   >
                     <option value="">{t.selectCategory}</option>
-                    {categories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>{capitalizeName(cat.name)}</option>
-                    ))}
+                    {[...categories]
+                      .sort((a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase()))
+                      .map((cat) => (
+                        <option key={cat.id} value={cat.id}>{capitalizeName(cat.name)}</option>
+                      ))}
                   </select>
                 </div>
                 <div className="manager-form-group">
@@ -684,9 +713,11 @@ function ManagerSpareparts() {
                     className="manager-form-input"
                   >
                     <option value="">Select brand</option>
-                    {brands.map((b) => (
-                      <option key={b.id} value={b.id}>{capitalizeName(b.name)}</option>
-                    ))}
+                    {[...brands]
+                      .sort((a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase()))
+                      .map((b) => (
+                        <option key={b.id} value={b.id}>{capitalizeName(b.name)}</option>
+                      ))}
                   </select>
                 </div>
                 <div className="manager-form-group">

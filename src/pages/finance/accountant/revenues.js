@@ -49,6 +49,7 @@ function AccountantRevenues() {
     amount: '',
     date: new Date().toISOString().slice(0, 10),
     status: 'Pending',
+    payment_method: '',
   });
   const [editForm, setEditForm] = useState({
     description: '',
@@ -95,7 +96,20 @@ function AccountantRevenues() {
     loadRevenues();
   }, [navigate]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -130,11 +144,19 @@ function AccountantRevenues() {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   };
 
+  const getMinAllowedDate = () => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30);
+    return date.toISOString().slice(0, 10);
+  };
+
   const isPastDate = (dateStr) => {
     const d = toDateOnly(dateStr);
     if (d == null) return false;
-    const today = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
-    return d < today;
+    const minDate = new Date();
+    minDate.setDate(minDate.getDate() - 30);
+    const minDateOnly = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate()).getTime();
+    return d < minDateOnly;
   };
 
   const isInPeriod = (dateStr, period) => {
@@ -187,6 +209,7 @@ function AccountantRevenues() {
       amount: '',
       date: new Date().toISOString().slice(0, 10),
       status: 'Pending',
+      payment_method: '',
     });
     setShowAddModal(true);
   };
@@ -208,13 +231,13 @@ function AccountantRevenues() {
       Swal.fire({
         icon: 'warning',
         title: 'Invalid date',
-        text: 'Past dates are not allowed. Please select today or a future date.',
+        text: 'Date cannot be more than 30 days before today. Please select a date from 30 days ago onwards.',
         confirmButtonColor: '#1a3a5f',
       });
       return;
     }
     const amountNum = parseFloat(String(addForm.amount).replace(/,/g, ''), 10);
-    if (!addForm.description.trim() || Number.isNaN(amountNum) || amountNum <= 0) return;
+    if (!addForm.description.trim() || !addForm.payment_method || Number.isNaN(amountNum) || amountNum <= 0) return;
     setSubmitting(true);
     try {
       const res = await createRevenue({
@@ -223,6 +246,7 @@ function AccountantRevenues() {
         category: addForm.category,
         amount: amountNum,
         status: addForm.status,
+        payment_method: addForm.payment_method,
         added_by: user?.id || null,
       });
       if (res.success && res.revenue) {
@@ -253,7 +277,7 @@ function AccountantRevenues() {
   const openEditModal = (rev) => {
     let dateStr = rev.date ? (typeof rev.date === 'string' && rev.date.length >= 10 ? rev.date.slice(0, 10) : new Date(rev.date).toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10);
     if (isPastDate(dateStr)) {
-      dateStr = new Date().toISOString().slice(0, 10);
+      dateStr = getMinAllowedDate();
     }
     setEditingRevenue(rev);
     setEditForm({
@@ -278,7 +302,7 @@ function AccountantRevenues() {
       Swal.fire({
         icon: 'warning',
         title: 'Invalid date',
-        text: 'Past dates are not allowed. Please select today or a future date.',
+        text: 'Date cannot be more than 30 days before today. Please select a date from 30 days ago onwards.',
         confirmButtonColor: '#1a3a5f',
       });
       return;
@@ -343,6 +367,10 @@ function AccountantRevenues() {
           <Link to="/finance/accountant/transactions" className={'nav-item' + (location.pathname === '/finance/accountant/transactions' ? ' active' : '')}>
             <FaReceipt className="nav-icon" />
             <span>Transactions</span>
+          </Link>
+          <Link to="/finance/accountant/loans" className={'nav-item' + (location.pathname === '/finance/accountant/loans' ? ' active' : '')}>
+            <FaMoneyBillWave className="nav-icon" />
+            <span>Loans</span>
           </Link>
           <Link to="/finance/accountant/expenses" className={'nav-item' + (location.pathname === '/finance/accountant/expenses' ? ' active' : '')}>
             <FaArrowDown className="nav-icon" />
@@ -461,6 +489,7 @@ function AccountantRevenues() {
                     <th>Description</th>
                     <th>Category</th>
                     <th>Amount (TZS)</th>
+                    <th>Payment method</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -468,7 +497,7 @@ function AccountantRevenues() {
                 <tbody>
                   {filteredRevenues.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="no-data">
+                      <td colSpan="7" className="no-data">
                         No revenues found
                       </td>
                     </tr>
@@ -481,6 +510,7 @@ function AccountantRevenues() {
                           <span className="category-badge">{rev.category}</span>
                         </td>
                         <td className="amount-positive">TZS {formatCurrency(rev.amount)}</td>
+                        <td>{rev.payment_method || '—'}</td>
                         <td>
                           <span className={`status-badge ${rev.status === 'Received' ? 'completed' : 'pending'}`}>
                             {rev.status}
@@ -553,7 +583,11 @@ function AccountantRevenues() {
 
       {showAddModal && (
         <div className="revenues-modal-overlay" onClick={() => setShowAddModal(false)}>
-          <div className="revenues-modal-content revenues-add-modal" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="revenues-modal-content revenues-add-modal"
+            style={{ maxHeight: '80vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="revenues-modal-header">
               <h3>Add revenue</h3>
               <button type="button" className="revenues-modal-close" onClick={() => setShowAddModal(false)}>×</button>
@@ -598,11 +632,26 @@ function AccountantRevenues() {
                 />
               </div>
               <div className="revenues-form-group">
+                <label htmlFor="add-payment-method">Payment method</label>
+                <select
+                  id="add-payment-method"
+                  value={addForm.payment_method}
+                  onChange={(e) => setAddForm((f) => ({ ...f, payment_method: e.target.value }))}
+                  className="revenues-form-input"
+                  required
+                >
+                  <option value="">Select payment method</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Mobile Payment">Mobile Payment</option>
+                </select>
+              </div>
+              <div className="revenues-form-group">
                 <label htmlFor="add-date">Date</label>
                 <input
                   id="add-date"
                   type="date"
-                  min={new Date().toISOString().slice(0, 10)}
+                  min={getMinAllowedDate()}
                   value={addForm.date}
                   onChange={(e) => setAddForm((f) => ({ ...f, date: e.target.value }))}
                   className="revenues-form-input"
@@ -635,7 +684,11 @@ function AccountantRevenues() {
 
       {showEditModal && editingRevenue && (
         <div className="revenues-modal-overlay" onClick={() => { setShowEditModal(false); setEditingRevenue(null); }}>
-          <div className="revenues-modal-content revenues-add-modal" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="revenues-modal-content revenues-add-modal"
+            style={{ maxHeight: '80vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="revenues-modal-header">
               <h3>Edit revenue</h3>
               <button type="button" className="revenues-modal-close" onClick={() => { setShowEditModal(false); setEditingRevenue(null); }}>×</button>
@@ -684,7 +737,7 @@ function AccountantRevenues() {
                 <input
                   id="edit-date"
                   type="date"
-                  min={new Date().toISOString().slice(0, 10)}
+                  min={getMinAllowedDate()}
                   value={editForm.date}
                   onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))}
                   className="revenues-form-input"

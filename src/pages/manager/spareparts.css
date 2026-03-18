@@ -64,6 +64,16 @@
   font-weight: 600;
 }
 
+.manager-spareparts-section .action-btn.delete {
+  background: #dc3545;
+  color: white;
+}
+
+.manager-spareparts-section .action-btn.delete:hover {
+  background: #c82333;
+  transform: translateY(-2px);
+}
+
 .manager-stat-low .stat-value {
   color: #dc3545;
 }

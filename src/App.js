@@ -21,6 +21,7 @@ import Settings from './pages/admin/setting';
 import CategoriesBrands from './pages/admin/categories&brands';
 import AccountantDashboard from './pages/finance/accountant/dashboard';
 import AccountantTransactions from './pages/finance/accountant/transactions';
+import AccountantLoans from './pages/finance/accountant/loans';
 import AccountantInvoices from './pages/finance/accountant/invoices';
 import AccountantReports from './pages/finance/accountant/reports';
 import AccountantSalaries from './pages/finance/accountant/salaries';
@@ -38,6 +39,7 @@ import ManagerSales from './pages/manager/sales';
 import ManagerSpareparts from './pages/manager/spareparts';
 import ManagerGenerateSales from './pages/manager/generateSales';
 import ManagerCustomersInfo from './pages/manager/customersInfo';
+import MainDashboard from './pages/main/dashboard';
 
 // Applies the current section's theme when route changes so admin/sales/finance/manager each keep their own theme
 function ThemeApplicator() {
@@ -58,6 +60,10 @@ function App() {
         {/* Public Routes */}
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
+
+        {/* Main (main table) Routes */}
+        <Route path="/main" element={<Navigate to="/main/dashboard" replace />} />
+        <Route path="/main/dashboard" element={<MainDashboard />} />
         
         {/* Admin Routes */}
         <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
@@ -81,6 +87,7 @@ function App() {
         {/* Finance Employee Routes */}
         <Route path="/finance/accountant/dashboard" element={<AccountantDashboard />} />
         <Route path="/finance/accountant/transactions" element={<AccountantTransactions />} />
+        <Route path="/finance/accountant/loans" element={<AccountantLoans />} />
         <Route path="/finance/accountant/expenses" element={<AccountantExpenses />} />
         <Route path="/finance/accountant/revenues" element={<AccountantRevenues />} />
         <Route path="/finance/accountant/reports" element={<AccountantReports />} />

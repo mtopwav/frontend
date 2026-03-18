@@ -39,7 +39,7 @@ import {
 } from 'react-icons/fa';
 import './spareparts.css';
 import logo from '../../images/logo.png';
-import { getCategories, getBrands, addSparePart, getSpareParts, updateSparePart } from '../../services/api';
+import { getCategories, getBrands, addSparePart, getSpareParts, updateSparePart, deleteSparePart } from '../../services/api';
 import { getCurrentDateTime, formatDateTime } from '../../utils/dateTime';
 import { useTranslation } from '../../utils/useTranslation';
 import ThemeToggle from '../../components/ThemeToggle';
@@ -94,8 +94,11 @@ function SpareParts() {
       const response = await getCategories();
       
       if (response && response.success && response.categories) {
-        // Store categories with both id and name
-        setCategories(response.categories);
+        // Store categories with both id and name, sorted alphabetically (A–Z)
+        const sortedCategories = [...response.categories].sort((a, b) =>
+          String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
+        );
+        setCategories(sortedCategories);
         console.log(`✅ Loaded ${response.categories.length} categories from database`);
       } else {
         setCategories([]);
@@ -120,8 +123,11 @@ function SpareParts() {
       const response = await getBrands();
       
       if (response && response.success && response.brands) {
-        // Store brands with both id and name
-        setBrands(response.brands);
+        // Store brands with both id and name, sorted alphabetically (A–Z)
+        const sortedBrands = [...response.brands].sort((a, b) =>
+          String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
+        );
+        setBrands(sortedBrands);
         console.log(`✅ Loaded ${response.brands.length} brands from database`);
       } else {
         setBrands([]);
@@ -500,14 +506,34 @@ function SpareParts() {
     });
 
     if (result.isConfirmed) {
-      setSpareParts(spareParts.filter(p => p.id !== id));
-      Swal.fire({
-        title: 'Deleted!',
-        text: 'Spare part has been deleted.',
-        icon: 'success',
-        timer: 2000,
-        showConfirmButton: false
-      });
+      try {
+        // Call API to delete spare part from database
+        const response = await deleteSparePart(id);
+        
+        if (response && response.success) {
+          // Refresh spare parts list from database
+          await fetchSpareParts();
+          
+          Swal.fire({
+            title: 'Deleted!',
+            text: 'Spare part has been deleted successfully.',
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false,
+            confirmButtonColor: '#1a3a5f'
+          });
+        } else {
+          throw new Error(response?.message || 'Failed to delete spare part');
+        }
+      } catch (error) {
+        console.error('Error deleting spare part:', error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: error.message || 'Failed to delete spare part. Please try again.',
+          confirmButtonColor: '#1a3a5f'
+        });
+      }
     }
   };
 

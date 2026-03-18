@@ -315,6 +315,35 @@
   border-color: #1a3a5f;
 }
 
+.sales-reports-date-label {
+  display: block;
+  font-size: 0.85rem;
+  color: #6c757d;
+  margin-bottom: 4px;
+  white-space: nowrap;
+}
+
+.sales-reports-date-input[type="date"] {
+  min-width: 140px;
+  cursor: pointer;
+}
+
+.sales-reports-clear-dates {
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  color: #1a3a5f;
+  background: transparent;
+  border: 1px solid #dee2e6;
+  border-radius: 5px;
+  cursor: pointer;
+  align-self: flex-end;
+}
+
+.sales-reports-clear-dates:hover {
+  background: #f0f0f0;
+  border-color: #1a3a5f;
+}
+
 /* Statistics Cards */
 .stats-row {
   display: grid;
@@ -417,8 +446,8 @@
 }
 
 .payments-table {
-  width: 100%;
-  min-width: 1200px;
+  width: 130%;
+  min-width: 2000px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -606,6 +635,28 @@
   background: #c82333;
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
+}
+
+.action-btn.print {
+  background: #6c757d;
+  color: white;
+}
+
+.action-btn.print:hover {
+  background: #5a6268;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(108, 117, 125, 0.3);
+}
+
+.action-btn.edit {
+  background: #ffc107;
+  color: #000;
+}
+
+.action-btn.edit:hover {
+  background: #e0a800;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(255, 193, 7, 0.3);
 }
 
 .action-icon {
@@ -914,30 +965,396 @@
   color: var(--text-primary, #e0e0e0);
 }
 
-/* Responsive */
-@media (max-width: 768px) {
-  .main-content {
-    margin-left: 0;
+/* ============================================
+   RESPONSIVE / MOBILE-FRIENDLY STYLES
+   ============================================ */
+
+/* Mobile Sidebar Overlay */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar-overlay.active {
+  display: block;
+  opacity: 1;
+}
+
+/* Tablet and Mobile (max-width: 1024px) */
+@media (max-width: 1024px) {
+  .payments-content {
+    padding: 20px;
   }
 
+  .payments-table {
+    font-size: 0.9rem;
+  }
+
+  .action-buttons {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .action-btn {
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+}
+
+/* Mobile (max-width: 768px) */
+@media (max-width: 768px) {
+  /* Sidebar - Hidden by default, slides in from left */
   .sidebar {
     transform: translateX(-100%);
+    width: 280px !important;
+    z-index: 1001;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
   }
 
   .sidebar.open {
     transform: translateX(0);
   }
 
-  .stats-row {
-    grid-template-columns: 1fr;
+  .sidebar.closed {
+    transform: translateX(-100%);
   }
 
+  .sidebar-overlay.active {
+    display: block;
+  }
+
+  /* Main content - Full width on mobile */
+  .main-content {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+
+  /* Header - Stack vertically on mobile */
+  .payments-header {
+    padding: 15px;
+    flex-direction: column;
+    gap: 15px;
+    align-items: flex-start;
+  }
+
+  .header-left {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .header-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: space-between;
+  }
+
+  .page-title {
+    font-size: 1.4rem;
+  }
+
+  .user-info {
+    padding: 6px 12px;
+    font-size: 0.9rem;
+  }
+
+  .user-name {
+    display: none; /* Hide username text on very small screens */
+  }
+
+  .logout-btn {
+    padding: 8px 15px;
+    font-size: 0.9rem;
+  }
+
+  .date-time-display {
+    font-size: 0.85rem;
+    margin-right: 0;
+  }
+
+  /* Content padding */
+  .payments-content {
+    padding: 15px;
+  }
+
+  /* Action bar - Stack vertically */
   .action-bar {
     flex-direction: column;
+    gap: 10px;
   }
 
-  .search-box,
+  .search-box {
+    min-width: 100%;
+    width: 100%;
+  }
+
   .filter-box {
     width: 100%;
+    min-width: 100%;
+  }
+
+  .status-filter {
+    width: 100%;
+  }
+
+  /* Stats row - Single column */
+  .stats-row {
+    grid-template-columns: 1fr !important;
+    gap: 15px;
+  }
+
+  .stat-card {
+    padding: 15px;
+  }
+
+  .stat-value {
+    font-size: 1.8rem;
+  }
+
+  /* Table - Horizontal scroll on mobile */
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -15px;
+    padding: 0 15px;
+  }
+
+  .payments-table {
+    min-width: 800px; /* Ensure table doesn't compress too much */
+    font-size: 0.85rem;
+  }
+
+  .payments-table th,
+  .payments-table td {
+    padding: 10px 8px;
+    white-space: nowrap;
+  }
+
+  /* Action buttons - Smaller and stacked */
+  .action-buttons {
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+  }
+
+  .action-btn {
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    justify-content: center;
+  }
+
+  .action-text {
+    display: inline;
+  }
+
+  /* Customer info and part info - Compact */
+  .customer-info,
+  .part-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+  }
+
+  .info-icon {
+    display: none; /* Hide icons on mobile to save space */
+  }
+
+  /* Modals - Full width on mobile */
+  .modal-overlay {
+    padding: 10px;
+  }
+
+  .modal-content {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .view-modal {
+    padding: 15px;
+  }
+
+  .modal-header {
+    padding: 15px;
+    flex-wrap: wrap;
+  }
+
+  .modal-header h2 {
+    font-size: 1.3rem;
+  }
+
+  .view-content {
+    padding: 15px;
+  }
+
+  .view-section {
+    gap: 15px;
+  }
+
+  .view-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .view-item label {
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+  }
+
+  .view-value {
+    width: 100%;
+    font-size: 0.95rem;
+  }
+
+  .modal-footer {
+    padding: 15px;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .modal-footer button {
+    width: 100%;
+  }
+
+  /* Status badges - Smaller */
+  .status-badge {
+    padding: 4px 8px;
+    font-size: 0.8rem;
+  }
+
+  /* Payment method badge */
+  .payment-method-badge {
+    font-size: 0.8rem;
+    padding: 4px 8px;
+  }
+
+  /* Amount cells */
+  .amount-cell {
+    font-size: 0.85rem;
+  }
+}
+
+/* Small Mobile (max-width: 480px) */
+@media (max-width: 480px) {
+  .payments-header {
+    padding: 12px;
+  }
+
+  .page-title {
+    font-size: 1.2rem;
+  }
+
+  .payments-content {
+    padding: 12px;
+  }
+
+  .table-container {
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+
+  .payments-table {
+    font-size: 0.8rem;
+    min-width: 700px;
+  }
+
+  .payments-table th,
+  .payments-table td {
+    padding: 8px 6px;
+  }
+
+  .stat-card {
+    padding: 12px;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+  }
+
+  .action-btn {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+  }
+
+  .modal-content {
+    padding: 12px;
+  }
+
+  .view-content {
+    padding: 12px;
+  }
+
+  .logout-btn span {
+    display: none; /* Hide "Logout" text, show only icon */
+  }
+
+  .logout-btn {
+    padding: 8px;
+    min-width: 40px;
+  }
+}
+
+/* Touch-friendly elements */
+@media (hover: none) and (pointer: coarse) {
+  /* Increase touch target sizes */
+  .nav-item {
+    padding: 18px 20px;
+    min-height: 48px;
+  }
+
+  .action-btn {
+    min-height: 44px;
+    padding: 12px 16px;
+  }
+
+  .menu-toggle {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
+  }
+
+  .logout-btn {
+    min-height: 44px;
+  }
+
+  .search-input,
+  .status-filter {
+    min-height: 44px;
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  /* Remove hover effects on touch devices */
+  .nav-item:hover {
+    background-color: transparent;
+  }
+
+  .action-btn:hover {
+    opacity: 1;
+  }
+}
+
+/* Landscape mobile orientation */
+@media (max-width: 768px) and (orientation: landscape) {
+  .modal-content {
+    max-height: 85vh;
+  }
+
+  .payments-header {
+    padding: 10px 15px;
+  }
+
+  .payments-content {
+    padding: 15px;
   }
 }

@@ -13,7 +13,8 @@ import {
   FaShoppingCart,
   FaBox,
   FaUsers,
-  FaCalendarAlt
+  FaCalendarAlt,
+  FaPrint
 } from 'react-icons/fa';
 import '../sales/payments.css';
 import './reports.css';
@@ -100,7 +101,20 @@ function ManagerReports() {
     };
   }, [navigate]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -149,6 +163,10 @@ function ManagerReports() {
   const loansApproved = loansOnly.filter((p) => p.status === 'Approved').length;
   const loansRejected = loansOnly.filter((p) => p.status === 'Rejected').length;
   const totalOutstanding = loansOnly.reduce((sum, p) => sum + Math.max(0, getAmountRemain(p)), 0);
+
+  const handlePrint = () => {
+    window.print();
+  };
 
   if (loading) {
     return (
@@ -238,27 +256,38 @@ function ManagerReports() {
         </header>
 
         <div className="payments-content">
-          <div className="manager-reports-tabs">
+          <div className="manager-reports-tabs" style={{ alignItems: 'center' }}>
+            <div>
+              <button
+                className={`manager-report-tab ${activeReport === 'sales' ? 'active' : ''}`}
+                onClick={() => setActiveReport('sales')}
+              >
+                <FaShoppingCart className="tab-icon" />
+                {t.salesReports}
+              </button>
+              <button
+                className={`manager-report-tab ${activeReport === 'transactions' ? 'active' : ''}`}
+                onClick={() => setActiveReport('transactions')}
+              >
+                <FaFileInvoice className="tab-icon" />
+                {t.transactionReports}
+              </button>
+              <button
+                className={`manager-report-tab ${activeReport === 'loans' ? 'active' : ''}`}
+                onClick={() => setActiveReport('loans')}
+              >
+                <FaMoneyBillWave className="tab-icon" />
+                {t.loansReports}
+              </button>
+            </div>
             <button
-              className={`manager-report-tab ${activeReport === 'sales' ? 'active' : ''}`}
-              onClick={() => setActiveReport('sales')}
+              type="button"
+              onClick={handlePrint}
+              className="action-btn print"
+              style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
-              <FaShoppingCart className="tab-icon" />
-              {t.salesReports}
-            </button>
-            <button
-              className={`manager-report-tab ${activeReport === 'transactions' ? 'active' : ''}`}
-              onClick={() => setActiveReport('transactions')}
-            >
-              <FaFileInvoice className="tab-icon" />
-              {t.transactionReports}
-            </button>
-            <button
-              className={`manager-report-tab ${activeReport === 'loans' ? 'active' : ''}`}
-              onClick={() => setActiveReport('loans')}
-            >
-              <FaMoneyBillWave className="tab-icon" />
-              {t.loansReports}
+              <FaPrint />
+              <span>Print Report</span>
             </button>
           </div>
 

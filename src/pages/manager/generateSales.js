@@ -105,7 +105,8 @@ function ManagerGenerateSales() {
             wholesale_price: p.wholesale_price != null ? Number(p.wholesale_price) : null,
             retail_price: p.retail_price != null ? Number(p.retail_price) : null,
             unitPrice: p.retail_price,
-            status: p.status
+            status: p.status,
+            stockQuantity: p.quantity != null ? Number(p.quantity) : 0
           }));
           setSpareParts(formatted);
         }
@@ -144,7 +145,20 @@ function ManagerGenerateSales() {
   }
   if (!user) return null;
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -233,10 +247,26 @@ function ManagerGenerateSales() {
 
   const handleUpdatePartQuantity = (partId, newQuantity) => {
     const raw = String(newQuantity).replace(/\D/g, '');
-    const value = raw === '' ? 0 : Math.max(1, parseInt(raw, 10) || 0);
-    setSelectedParts(selectedParts.map(sp =>
-      String(sp.partId) === String(partId) ? { ...sp, quantity: value } : sp
-    ));
+    let value = raw === '' ? 0 : Math.max(1, parseInt(raw, 10) || 0);
+
+    setSelectedParts(prev =>
+      prev.map(sp => {
+        if (String(sp.partId) !== String(partId)) return sp;
+
+        const stock = sp.part && sp.part.stockQuantity != null ? Number(sp.part.stockQuantity) : null;
+        if (stock != null && stock > 0 && value > stock) {
+          Swal.fire({
+            icon: 'warning',
+            title: 'Stock limit exceeded',
+            text: `Only ${stock} unit(s) of "${capitalizeName(sp.part.name)}" are available in stock.`,
+            confirmButtonColor: '#1a3a5f'
+          });
+          value = stock;
+        }
+
+        return { ...sp, quantity: value };
+      })
+    );
   };
 
   const getUnitPrice = (part) => {
@@ -265,8 +295,30 @@ function ManagerGenerateSales() {
       return;
     }
     try {
-      const items = selectedParts
-        .map(sp => ({ sp, unitPrice: getUnitPrice(sp.part), qty: Math.max(0, parseInt(sp.quantity, 10) || 0) }))
+      const withQty = selectedParts.map(sp => ({
+        sp,
+        unitPrice: getUnitPrice(sp.part),
+        qty: Math.max(0, parseInt(sp.quantity, 10) || 0)
+      }));
+
+      // Validate against stock quantities
+      const overStock = withQty.find(({ sp, qty }) => {
+        const stock = sp.part && sp.part.stockQuantity != null ? Number(sp.part.stockQuantity) : null;
+        return stock != null && stock >= 0 && qty > stock;
+      });
+
+      if (overStock) {
+        const stock = overStock.sp.part.stockQuantity;
+        Swal.fire({
+          icon: 'warning',
+          title: 'Stock limit exceeded',
+          text: `Quantity for "${capitalizeName(overStock.sp.part.name)}" cannot be greater than available stock (${stock}).`,
+          confirmButtonColor: '#1a3a5f'
+        });
+        return;
+      }
+
+      const items = withQty
         .filter(({ qty }) => qty > 0)
         .map(({ sp, unitPrice, qty }) => ({
           sparepart_id: sp.part.id,
@@ -374,7 +426,7 @@ function ManagerGenerateSales() {
 
         <div className="payments-content">
           <div className="dashboard-content">
-            <div className="dashboard-card">
+            <div className="dashboard-card" style={{ minHeight: '520px' }}>
               <div className="card-header">
                 <h2>Generate Sales</h2>
               </div>
@@ -535,8 +587,8 @@ function ManagerGenerateSales() {
                               border: '1px solid #ddd',
                               borderRadius: '5px',
                               boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-                              maxHeight: '200px',
-                              overflowY: 'auto',
+                              maxHeight: filteredParts.length > 1 ? '200px' : 'auto',
+                              overflowY: filteredParts.length > 1 ? 'auto' : 'visible',
                               zIndex: 1000,
                               marginTop: '5px'
                             }}>

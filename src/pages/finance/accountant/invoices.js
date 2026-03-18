@@ -144,7 +144,20 @@ function AccountantInvoices() {
       .catch(() => {});
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
     localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     navigate('/login');
@@ -501,11 +514,8 @@ function AccountantInvoices() {
     const subTotal = hasItems
       ? items.reduce((s, it) => s + (parseFloat(it.wholesale_price) || 0) * (parseInt(it.quantity, 10) || 1), 0)
       : amountNum;
-    const vatRate = 5;
-    const vatAmount = hasItems ? subTotal * (vatRate / 100) : 0;
-    const totalAmount = hasItems ? subTotal + vatAmount : amountNum;
-    const discount = 0;
-    const totalAfterDiscount = totalAmount - discount;
+    // No VAT / percentage calculation – total is just the subtotal (or saved amount)
+    const totalAmount = subTotal;
 
     const logoUrl = typeof logo === 'string' && logo
       ? (logo.startsWith('http') ? logo : window.location.origin + (logo.startsWith('/') ? logo : '/' + logo))
@@ -518,35 +528,32 @@ function AccountantInvoices() {
           const qty = parseInt(it.quantity, 10) || 1;
           const rate = parseFloat(it.wholesale_price) || 0;
           const amount = rate * qty;
-          const vat = vatRate ? amount * (vatRate / 100) : 0;
-          const total = amount + vat;
+          // Each spare part on its own row; Description first, then Part No.
           return `<tr>
             <td class="tc">${i + 1}</td>
-            <td>${(it.part_number || '—').replace(/</g, '&lt;')}</td>
             <td>${(it.part_name || '—').replace(/</g, '&lt;')}</td>
+            <td>${(it.part_number || '—').replace(/</g, '&lt;')}</td>
             <td class="tr">${qty}</td>
             <td class="tr">${formatCurrency(rate)}</td>
             <td>PCS</td>
             <td class="tr">${formatCurrency(amount)}</td>
-            <td class="tr">${formatCurrency(vat)}</td>
-            <td class="tr">${formatCurrency(total)}</td>
+            <td class="tr">${formatCurrency(amount)}</td>
           </tr>`;
         }).join('')
       : `<tr>
           <td class="tc">1</td>
-          <td>—</td>
           <td>${(inv.description || '—').replace(/</g, '&lt;')}</td>
+          <td>—</td>
           <td class="tr">1</td>
           <td class="tr">${formatCurrency(amountNum)}</td>
           <td>PCS</td>
-          <td class="tr">${formatCurrency(amountNum)}</td>
-          <td class="tr">0</td>
+          <td class="tr">${amountStr}</td>
           <td class="tr">${amountStr}</td>
         </tr>`;
 
     const emptyRowHtml = '';
 
-    const amountInWords = numberToWords(Math.floor(totalAfterDiscount)) + ' TZS Only';
+    const amountInWords = numberToWords(Math.floor(totalAmount)) + ' TZS Only';
 
     return `
 <!DOCTYPE html>
@@ -619,37 +626,21 @@ function AccountantInvoices() {
     <thead>
       <tr>
         <th style="width:4%">Sr.No.</th>
-        <th style="width:11%" class="tl">Part No.</th>
         <th style="width:22%" class="tl">Description</th>
+        <th style="width:11%" class="tl">Part No.</th>
         <th style="width:7%">Quantity</th>
-        <th style="width:10%"><span>Rate</span><span class="sub">TZS</span></th>
+        <th style="width:10%"><span>Price</span><span class="sub">TZS</span></th>
         <th style="width:6%">Per</th>
         <th style="width:11%"><span>Amount</span><span class="sub">TZS</span></th>
-        <th style="width:12%"><span>Total Amount</span><span class="sub">Inc VAT TZS</span></th>
+        <th style="width:12%"><span>Total Amount</span><span class="sub">TZS</span></th>
       </tr>
     </thead>
     <tbody>
       ${itemRows}
       ${emptyRowHtml}
-      <tr class="total-row total-first">
-        <td colspan="6" class="tr" style="font-weight:600;">Total</td>
-        <td class="tr">${formatCurrency(subTotal)}</td>
+      <tr class="total-row total-first total-final">
+        <td colspan="7" class="tr" style="font-weight:600;">Total</td>
         <td class="tr">${formatCurrency(totalAmount)}</td>
-      </tr>
-      <tr class="total-row">
-        <td colspan="6" class="tr" style="font-weight:600;">Discount</td>
-        <td class="tr">${discount ? formatCurrency(-discount) : '—'}</td>
-        <td class="tr">—</td>
-        <td class="tr">${discount ? formatCurrency(totalAfterDiscount) : '—'}</td>
-      </tr>
-      <tr class="total-row total-final">
-        <td colspan="6" class="tr">Total after Discount</td>
-        <td class="tr">${formatCurrency(subTotal)}</td>
-        <td class="tr">${formatCurrency(totalAfterDiscount)}</td>
-      </tr>
-      <tr class="col-labels">
-        <td colspan="6"></td>
-        <td>TZS TOTAL AMOUNT</td>
       </tr>
     </tbody>
   </table>
@@ -710,6 +701,10 @@ function AccountantInvoices() {
           <Link to="/finance/accountant/transactions" className={'nav-item' + (location.pathname === '/finance/accountant/transactions' ? ' active' : '')}>
             <FaReceipt className="nav-icon" />
             <span>Transactions</span>
+          </Link>
+          <Link to="/finance/accountant/loans" className={'nav-item' + (location.pathname === '/finance/accountant/loans' ? ' active' : '')}>
+            <FaMoneyBillWave className="nav-icon" />
+            <span>Loans</span>
           </Link>
           <Link to="/finance/accountant/expenses" className={'nav-item' + (location.pathname === '/finance/accountant/expenses' ? ' active' : '')}>
             <FaArrowDown className="nav-icon" />
