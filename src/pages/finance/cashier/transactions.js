@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import {
@@ -9,6 +9,7 @@ import {
   FaSearch,
   FaCreditCard,
   FaFileInvoice,
+  FaMoneyBillWave,
   FaCashRegister,
   FaChartBar,
   FaCheckCircle,
@@ -27,6 +28,37 @@ import { getPayments, updatePaymentStatus, updatePaymentDetails } from '../../..
 import { formatDateTime, getCurrentDateTime } from '../../../utils/dateTime';
 import { useTranslation } from '../../../utils/useTranslation';
 
+/**
+ * Put the received amount into the matching DB column; Loan / Credit Card only use payment_method (all channels null).
+ */
+function buildPaymentChannelBreakdown(paymentMethod, amountReceived) {
+  const amt = Number(amountReceived) || 0;
+  const empty = {
+    cash: null,
+    bank_transfer: null,
+    airtel_money: null,
+    mpesa: null,
+    mix_by_yas: null,
+  };
+  const m = String(paymentMethod || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  if (m === 'cash') return { ...empty, cash: amt };
+  if (m === 'bank transfer') return { ...empty, bank_transfer: amt };
+  if (m === 'airtel money') return { ...empty, airtel_money: amt };
+  if (m === 'm-pesa' || m === 'mpesa') return { ...empty, mpesa: amt };
+  if (m.includes('mix') && m.includes('yas')) return { ...empty, mix_by_yas: amt };
+  return { ...empty };
+}
+
+/** Canonical payment_type stored in API/DB (always Loan or Sales). */
+function toDbPaymentType(input) {
+  const s = String(input || '').trim().toLowerCase();
+  if (s === 'loan') return 'Loan';
+  return 'Sales';
+}
+
 function CashierTransactions() {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -44,6 +76,13 @@ function CashierTransactions() {
   const [approving, setApproving] = useState(false);
   const [amountReceivedInput, setAmountReceivedInput] = useState('');
   const [paymentMethodInput, setPaymentMethodInput] = useState('Cash');
+  const [paymentTypeInput, setPaymentTypeInput] = useState('Sales');
+  const [splitCashInput, setSplitCashInput] = useState('');
+  const [splitBankInput, setSplitBankInput] = useState('');
+  const [splitAirtelInput, setSplitAirtelInput] = useState('');
+  const [splitMpesaInput, setSplitMpesaInput] = useState('');
+  const [splitYasInput, setSplitYasInput] = useState('');
+  const confirmLockRef = useRef(false);
 
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -204,11 +243,47 @@ function CashierTransactions() {
     return Math.max(0, baseTotal - discount);
   };
 
+  // Some records may have `amount_received` duplicated while the specific payment channel column
+  // (e.g. `bank_transfer`) contains the correct value. For UI and clamping, derive received amount
+  // from the channel column matching `payment_method`.
+  const getReceivedAmountForMethod = (payment) => {
+    if (!payment) return 0;
+    const m = String(payment.payment_method || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
+    const fromChannel = {
+      cash: Number(payment.cash) || 0,
+      bank_transfer: Number(payment.bank_transfer) || 0,
+      airtel_money: Number(payment.airtel_money) || 0,
+      mpesa: Number(payment.mpesa) || 0,
+      mix_by_yas: Number(payment.mix_by_yas) || 0,
+    };
+
+    if (m === 'cash') return fromChannel.cash || Number(payment.amount_received) || 0;
+    if (m === 'bank transfer') return fromChannel.bank_transfer || Number(payment.amount_received) || 0;
+    if (m === 'airtel money') return fromChannel.airtel_money || Number(payment.amount_received) || 0;
+    if (m === 'm-pesa' || m === 'm pesa' || m === 'mpesa' || m === 'm-pesa') {
+      return fromChannel.mpesa || Number(payment.amount_received) || 0;
+    }
+    if (m.includes('mix') && m.includes('yas')) return fromChannel.mix_by_yas || Number(payment.amount_received) || 0;
+
+    // Loan / Credit Card / anything else falls back to amount_received.
+    return Number(payment.amount_received) || 0;
+  };
+
   const formatWithCommas = (val) => {
     if (val === '' || val == null) return '';
     const digits = String(val).replace(/\D/g, '');
     if (digits === '') return '';
     return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  };
+
+  const parseCommaNumber = (val) => {
+    const s = String(val || '').replace(/,/g, '');
+    const n = parseFloat(s);
+    return Number.isNaN(n) ? 0 : n;
   };
 
   const formatDateTime = (dateString) => {
@@ -306,6 +381,7 @@ function CashierTransactions() {
 
   const handleConfirmApprove = async () => {
     if (!selectedPayment) return;
+
     // Prevent double-approval if status is already Approved
     if (selectedPayment.status === 'Approved') {
       Swal.fire({
@@ -316,16 +392,125 @@ function CashierTransactions() {
       });
       return;
     }
-    const received = Number(amountReceivedInput) || 0;
+
+    // Lock immediately so rapid double-clicks cannot run validation twice or stack API calls
+    if (confirmLockRef.current || approving) {
+      Swal.fire({
+        icon: 'info',
+        title: t.processing || 'Processing',
+        text: t.waitForConfirmation || 'Please wait — approval is already in progress.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
+    confirmLockRef.current = true;
+
+    const releaseLockUnlessSuccess = (success) => {
+      if (!success) confirmLockRef.current = false;
+    };
+
+    const dbPaymentType = toDbPaymentType(paymentTypeInput);
+    const isLoanFlow = dbPaymentType === 'Loan';
+
+    const splitCash = parseCommaNumber(splitCashInput);
+    const splitBank = parseCommaNumber(splitBankInput);
+    const splitAirtel = parseCommaNumber(splitAirtelInput);
+    const splitMpesa = parseCommaNumber(splitMpesaInput);
+    const splitYas = parseCommaNumber(splitYasInput);
+    const splitTotal = splitCash + splitBank + splitAirtel + splitMpesa + splitYas;
+    const useSplit = !isLoanFlow && splitTotal > 0;
+
+    if (!isLoanFlow && !useSplit && !String(paymentMethodInput || '').trim()) {
+      releaseLockUnlessSuccess(false);
+      Swal.fire({
+        icon: 'warning',
+        title: t.invalidPaymentMethod || 'Invalid payment method',
+        text: t.selectPaymentMethod || 'Please select a payment method.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
+
+    const methodsUsed = [
+      splitCash > 0 ? 'Cash' : null,
+      splitBank > 0 ? 'Bank Transfer' : null,
+      splitAirtel > 0 ? 'Airtel Money' : null,
+      splitMpesa > 0 ? 'M-Pesa' : null,
+      splitYas > 0 ? 'Mix By Yas' : null,
+    ].filter(Boolean);
+    const baseReceived = Number(amountReceivedInput) || 0;
+    if (!isLoanFlow && useSplit && baseReceived > 0 && String(paymentMethodInput || '').trim()) {
+      methodsUsed.push(String(paymentMethodInput || '').trim());
+    }
+    const uniqueMethodsUsed = Array.from(new Set(methodsUsed.map((m) => String(m).toLowerCase()))).map(
+      (m) => methodsUsed.find((orig) => String(orig).toLowerCase() === m)
+    );
+
+    const effectivePaymentMethod = isLoanFlow
+      ? 'Loan'
+      : useSplit
+      ? (uniqueMethodsUsed.length > 1 ? 'Mixed' : uniqueMethodsUsed[0])
+      : String(paymentMethodInput || '').trim();
+
+    const method = String(effectivePaymentMethod || '').trim();
+    if (!method) {
+      releaseLockUnlessSuccess(false);
+      Swal.fire({
+        icon: 'warning',
+        title: t.invalidPaymentMethod || 'Invalid payment method',
+        text: t.selectPaymentMethod || 'Please select a payment method.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
+
+    const received = isLoanFlow ? 0 : baseReceived + (useSplit ? splitTotal : 0);
     const total = getTotalAmount(selectedPayment);
     const amountRemain = Math.max(0, total - received);
+    let channelBreakdown = useSplit
+      ? {
+          cash: (Number(selectedPayment.cash) || 0) + splitCash,
+          bank_transfer: (Number(selectedPayment.bank_transfer) || 0) + splitBank,
+          airtel_money: (Number(selectedPayment.airtel_money) || 0) + splitAirtel,
+          mpesa: (Number(selectedPayment.mpesa) || 0) + splitMpesa,
+          mix_by_yas: (Number(selectedPayment.mix_by_yas) || 0) + splitYas,
+        }
+      : buildPaymentChannelBreakdown(effectivePaymentMethod, received);
+    // If user enters both base amount and split amounts, assign the base amount
+    // to the selected payment method channel so print reports can list all methods used.
+    if (useSplit && baseReceived > 0) {
+      const baseMethod = String(paymentMethodInput || '').trim();
+      if (!baseMethod) {
+        releaseLockUnlessSuccess(false);
+        Swal.fire({
+          icon: 'warning',
+          title: t.invalidPaymentMethod || 'Invalid payment method',
+          text: t.selectPaymentMethod || 'Please select a payment method.',
+          confirmButtonColor: '#1a3a5f',
+        });
+        return;
+      }
+      const baseBreakdown = buildPaymentChannelBreakdown(baseMethod, baseReceived);
+      channelBreakdown = {
+        cash: (Number(channelBreakdown.cash) || 0) + (Number(baseBreakdown.cash) || 0),
+        bank_transfer:
+          (Number(channelBreakdown.bank_transfer) || 0) + (Number(baseBreakdown.bank_transfer) || 0),
+        airtel_money:
+          (Number(channelBreakdown.airtel_money) || 0) + (Number(baseBreakdown.airtel_money) || 0),
+        mpesa: (Number(channelBreakdown.mpesa) || 0) + (Number(baseBreakdown.mpesa) || 0),
+        mix_by_yas: (Number(channelBreakdown.mix_by_yas) || 0) + (Number(baseBreakdown.mix_by_yas) || 0),
+      };
+    }
+
     setApproving(true);
+    let approveSucceeded = false;
     try {
       const responseDetails = await updatePaymentDetails(selectedPayment.id, {
         amount_received: received,
         amount_remain: amountRemain,
-        payment_method: paymentMethodInput,
-        confirmed_by_cashier_id: user?.id,
+        payment_method: effectivePaymentMethod,
+        payment_type: dbPaymentType,
+        ...channelBreakdown,
       });
       if (!responseDetails.success) {
         throw new Error(responseDetails.message || 'Failed to confirm transaction');
@@ -344,7 +529,13 @@ function CashierTransactions() {
                 ...p,
                 amount_received: received,
                 amount_remain: amountRemain,
-                payment_method: paymentMethodInput,
+                payment_method: effectivePaymentMethod,
+                payment_type: dbPaymentType,
+                cash: channelBreakdown.cash,
+                bank_transfer: channelBreakdown.bank_transfer,
+                airtel_money: channelBreakdown.airtel_money,
+                mpesa: channelBreakdown.mpesa,
+                mix_by_yas: channelBreakdown.mix_by_yas,
                 status: 'Approved',
                 approved_at: new Date().toISOString(),
               }
@@ -359,8 +550,14 @@ function CashierTransactions() {
         confirmButtonColor: '#1a3a5f',
       });
 
-      // Navigate directly to receipts page after approval
-      navigate('/finance/cashier/receipts');
+      // Redirect by payment method after approval
+      const methodToRoute = String(effectivePaymentMethod || '').toLowerCase().trim();
+      if (isLoanFlow || methodToRoute === 'loan') {
+        navigate('/finance/cashier/loans');
+      } else {
+        navigate('/finance/cashier/receipts');
+      }
+      approveSucceeded = true;
     } catch (error) {
       console.error('Error confirming transaction:', error);
       Swal.fire({
@@ -371,6 +568,7 @@ function CashierTransactions() {
       });
     } finally {
       setApproving(false);
+      if (!approveSucceeded) confirmLockRef.current = false;
     }
   };
 
@@ -379,8 +577,11 @@ function CashierTransactions() {
 
   const getRecordDateForFilters = (payment) => {
     if (!payment) return null;
-    // For approved transactions, use approved date for records (fallback to created_at)
-    if (payment.status === 'Approved') return payment.approved_at || payment.approvedAt || payment.confirmed_at || payment.created_at;
+    // Use the confirmation/approval timestamp as the reporting date when available.
+    // This ensures an order created yesterday but approved today appears in today's report.
+    if (payment.approved_at || payment.approvedAt || payment.confirmed_at) {
+      return payment.approved_at || payment.approvedAt || payment.confirmed_at;
+    }
     return payment.created_at;
   };
 
@@ -421,10 +622,10 @@ function CashierTransactions() {
       (payment.employee_name && payment.employee_name.toLowerCase().includes(term));
 
     const total = getTotalAmount(payment);
-    const received = Number(payment.amount_received) || 0;
+    const received = getReceivedAmountForMethod(payment);
     const amountRemain = total - received;
-    const displayApproved = payment.status === 'Approved' || (payment.status === 'Pending' && amountRemain === 0);
-    const displayPending = payment.status === 'Pending' && amountRemain !== 0;
+    const displayApproved = payment.status === 'Approved';
+    const displayPending = payment.status === 'Pending';
     const matchesStatus =
       statusFilter === 'All' ||
       (statusFilter === 'Approved' && displayApproved) ||
@@ -476,7 +677,11 @@ function CashierTransactions() {
           </Link>
           <Link to="/finance/cashier/receipts" className="nav-item">
             <FaFileInvoice className="nav-icon" />
-            <span>{t.receiptsLabel || 'Receipts'}</span>
+            <span>{t.payments || 'Payments'}</span>
+          </Link>
+          <Link to="/finance/cashier/loans" className="nav-item">
+            <FaMoneyBillWave className="nav-icon" />
+            <span>{t.loans || 'Loans'}</span>
           </Link>
           <Link to="/finance/cashier/reports" className="nav-item">
             <FaChartBar className="nav-icon" />
@@ -598,6 +803,7 @@ function CashierTransactions() {
                   <th>{t.unitPrice}</th>
                   <th>{t.totalAmount}</th>
                   <th>{t.discount || 'Discount'}</th>
+                  <th>{t.paymentType || 'Payment type'}</th>
                   <th>{t.paymentMethod}</th>
                   <th>{t.amountReceived}</th>
                   <th>{t.amountRemain}</th>
@@ -608,7 +814,7 @@ function CashierTransactions() {
               <tbody>
                 {filteredPayments.length === 0 ? (
                   <tr>
-                    <td colSpan="11" className="no-data">
+                    <td colSpan="13" className="no-data">
                       {t.noTransactionsFound}
                     </td>
                   </tr>
@@ -630,18 +836,32 @@ function CashierTransactions() {
                                 className="action-btn approve"
                                 title={t.approve}
                                 onClick={() => {
+                                  confirmLockRef.current = false;
                                   setSelectedPayment(payment);
                                   const total = getTotalAmount(payment);
-                                  const received =
-                                    payment.amount_received != null
-                                      ? Math.min(
-                                          Math.max(Number(payment.amount_received) || 0, 0),
-                                          total
-                                        )
-                                      : 0;
-                                  setAmountReceivedInput(
-                                    payment.amount_received != null ? String(received) : ''
-                                  );
+                                  const pt = String(payment.payment_type || '').trim().toLowerCase();
+                                  if (pt === 'loan') {
+                                    setAmountReceivedInput('0');
+                                    setPaymentMethodInput('Loan');
+                                    setPaymentTypeInput('Loan');
+                                  } else {
+                                    const currentReceived = getReceivedAmountForMethod(payment);
+                                    const received = Math.min(Math.max(Number(currentReceived) || 0, 0), total);
+                                    setAmountReceivedInput(
+                                      payment.amount_received != null || currentReceived > 0 ? String(received) : ''
+                                    );
+                                    setPaymentTypeInput(toDbPaymentType(payment.payment_type));
+                                    if (pt === 'sales') {
+                                      setPaymentMethodInput(payment.payment_method || '');
+                                    } else {
+                                      setPaymentMethodInput(payment.payment_method || 'Cash');
+                                    }
+                                  }
+                                setSplitCashInput('');
+                                setSplitBankInput('');
+                                setSplitAirtelInput('');
+                                setSplitMpesaInput('');
+                                setSplitYasInput('');
                                   setShowApproveModal(true);
                                 }}
                               >
@@ -720,30 +940,35 @@ function CashierTransactions() {
                       </td>
                       <td>
                         <span className="payment-method-badge">
+                          {toDbPaymentType(payment.payment_type)}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="payment-method-badge">
                           {payment.payment_method || '—'}
                         </span>
                       </td>
                       <td className="amount-cell">
-                        {payment.amount_received != null
-                          ? `TZS ${formatPrice(payment.amount_received)}`
+                        {Number(getReceivedAmountForMethod(payment)) > 0
+                          ? `TZS ${formatPrice(getReceivedAmountForMethod(payment))}`
                           : '—'}
                       </td>
                       <td className="amount-cell">
                         {(() => {
                           const total = getTotalAmount(payment);
-                          const received = Number(payment.amount_received) || 0;
+                          const received = getReceivedAmountForMethod(payment);
                           return `TZS ${formatPrice(Math.max(0, total - received))}`;
                         })()}
                       </td>
                       <td>
                         {(() => {
                           const total = getTotalAmount(payment);
-                          const received = Number(payment.amount_received) || 0;
+                          const received = getReceivedAmountForMethod(payment);
                           const amountRemain = total - received;
                           const displayStatus =
                             payment.status === 'Rejected'
                               ? 'Rejected'
-                              : payment.status === 'Approved' || amountRemain === 0
+                              : payment.status === 'Approved'
                               ? 'Approved'
                               : 'Pending';
                           return (
@@ -764,7 +989,7 @@ function CashierTransactions() {
                           );
                         })()}
                       </td>
-                      <td>{formatDateTime(payment.created_at)}</td>
+                      <td>{formatDateTime(getRecordDateForFilters(payment) || payment.created_at)}</td>
                     </tr>
                   ))
                 )}
@@ -882,30 +1107,83 @@ function CashierTransactions() {
                   </div>
                 </div>
                 <div className="view-item">
-                  <label><FaCreditCard /> Payment Method</label>
+                  <label>{t.paymentType || 'Payment type'}</label>
                   <div className="view-value">
                     <select
-                      value={paymentMethodInput}
-                      onChange={(e) => setPaymentMethodInput(e.target.value)}
+                      value={paymentTypeInput}
+                      onChange={(e) => {
+                        const nextType = e.target.value;
+                        setPaymentTypeInput(nextType);
+                        if (toDbPaymentType(nextType) === 'Loan') {
+                          setPaymentMethodInput('Loan');
+                          setAmountReceivedInput('0');
+                        } else {
+                          setPaymentMethodInput('');
+                        }
+                      }}
                       style={{
                         width: '100%',
-                        maxWidth: '220px',
+                        maxWidth: '280px',
                         padding: '8px 12px',
                         fontSize: '1rem',
                         border: '1px solid #ddd',
                         borderRadius: '6px',
                         boxSizing: 'border-box',
                         backgroundColor: 'white',
-                        cursor: 'pointer'
+                        cursor: 'pointer',
                       }}
                     >
-                      <option value="Cash">Cash</option>
-                      <option value="M-Pesa">M-Pesa</option>
-                      <option value="Mix By Yas">Mix By Yas</option>
-                      <option value="Airtel Money">Airtel Money</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                      <option value="Credit Card">Credit Card</option>
+                      <option value="Loan">{t.loan || 'Loan'}</option>
+                      <option value="Sales">{t.sales || 'Sales'}</option>
                     </select>
+                  </div>
+                </div>
+                <div className="view-item">
+                  <label><FaCreditCard /> {t.paymentMethod || 'Payment Method'}</label>
+                  <div className="view-value">
+                    {toDbPaymentType(paymentTypeInput) === 'Loan' ? (
+                      <select
+                        value="Loan"
+                        disabled
+                        style={{
+                          width: '100%',
+                          maxWidth: '220px',
+                          padding: '8px 12px',
+                          fontSize: '1rem',
+                          border: '1px solid #ddd',
+                          borderRadius: '6px',
+                          boxSizing: 'border-box',
+                          backgroundColor: '#f5f5f5',
+                          cursor: 'not-allowed',
+                        }}
+                      >
+                        <option value="Loan">{t.loan || 'Loan'}</option>
+                      </select>
+                    ) : (
+                      <select
+                        value={paymentMethodInput}
+                        onChange={(e) => setPaymentMethodInput(e.target.value)}
+                        style={{
+                          width: '100%',
+                          maxWidth: '220px',
+                          padding: '8px 12px',
+                          fontSize: '1rem',
+                          border: '1px solid #ddd',
+                          borderRadius: '6px',
+                          boxSizing: 'border-box',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <option value="">{t.selectPaymentMethod || 'Select Payment Method'}</option>
+                        <option value="Cash">Cash</option>
+                        <option value="M-Pesa">M-Pesa</option>
+                        <option value="Mix By Yas">Mix By Yas</option>
+                        <option value="Airtel Money">Airtel Money</option>
+                        <option value="Bank Transfer">Bank Transfer</option>
+                        <option value="Credit Card">Credit Card</option>
+                      </select>
+                    )}
                   </div>
                 </div>
                 <div className="view-item">
@@ -914,8 +1192,20 @@ function CashierTransactions() {
                     <input
                       type="text"
                       inputMode="numeric"
+                      readOnly={toDbPaymentType(paymentTypeInput) === 'Loan'}
                       value={formatWithCommas(amountReceivedInput)}
                       onChange={(e) => {
+                        if (toDbPaymentType(paymentTypeInput) === 'Loan') return;
+                        if (
+                          splitCashInput ||
+                          splitBankInput ||
+                          splitAirtelInput ||
+                          splitMpesaInput ||
+                          splitYasInput
+                        ) {
+                          // When split fields are used, ignore direct amount edits.
+                          return;
+                        }
                         const raw = e.target.value.replace(/\D/g, '');
                         if (raw === '') {
                           setAmountReceivedInput('');
@@ -934,7 +1224,93 @@ function CashierTransactions() {
                         fontSize: '1rem',
                         border: '1px solid #ddd',
                         borderRadius: '6px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        backgroundColor:
+                          toDbPaymentType(paymentTypeInput) === 'Loan'
+                            ? '#f5f5f5'
+                            : 'white',
+                        cursor:
+                          toDbPaymentType(paymentTypeInput) === 'Loan'
+                            ? 'not-allowed'
+                            : 'text',
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="view-item">
+                  <label>Split payment (optional)</label>
+                  <div
+                    className="view-value"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: '8px',
+                      maxWidth: '360px',
+                    }}
+                  >
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="form-control"
+                      placeholder="Cash"
+                      value={formatWithCommas(splitCashInput)}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setSplitCashInput(filtered);
+                      }}
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="form-control"
+                      placeholder="Bank Transfer"
+                      value={formatWithCommas(splitBankInput)}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setSplitBankInput(filtered);
+                      }}
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="form-control"
+                      placeholder="Airtel Money"
+                      value={formatWithCommas(splitAirtelInput)}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setSplitAirtelInput(filtered);
+                      }}
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="form-control"
+                      placeholder="M-Pesa"
+                      value={formatWithCommas(splitMpesaInput)}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setSplitMpesaInput(filtered);
+                      }}
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="form-control"
+                      placeholder="Mix By Yas"
+                      value={formatWithCommas(splitYasInput)}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setSplitYasInput(filtered);
                       }}
                     />
                   </div>
@@ -944,7 +1320,14 @@ function CashierTransactions() {
                   <div className="view-value">
                     TZS {formatPrice(
                       getTotalAmount(selectedPayment) -
-                      (Number(amountReceivedInput) || 0)
+                      (toDbPaymentType(paymentTypeInput) === 'Loan'
+                        ? 0
+                        : (Number(amountReceivedInput) || 0) +
+                          parseCommaNumber(splitCashInput) +
+                          parseCommaNumber(splitBankInput) +
+                          parseCommaNumber(splitAirtelInput) +
+                          parseCommaNumber(splitMpesaInput) +
+                          parseCommaNumber(splitYasInput))
                     )}
                   </div>
                 </div>
@@ -953,7 +1336,13 @@ function CashierTransactions() {
                   <div className="view-value">
                     {(() => {
                       const total = getTotalAmount(selectedPayment);
-                      const received = Number(amountReceivedInput) || 0;
+                      const received =
+                        (Number(amountReceivedInput) || 0) +
+                        parseCommaNumber(splitCashInput) +
+                        parseCommaNumber(splitBankInput) +
+                        parseCommaNumber(splitAirtelInput) +
+                        parseCommaNumber(splitMpesaInput) +
+                        parseCommaNumber(splitYasInput);
                       const amountRemain = total - received;
                       const displayApproved = amountRemain === 0;
                       return (
@@ -987,6 +1376,7 @@ function CashierTransactions() {
                 {t.cancel}
               </button>
               <button
+                type="button"
                 className="action-btn approve"
                 style={{ marginLeft: '10px' }}
                 onClick={handleConfirmApprove}
@@ -1145,8 +1535,8 @@ function CashierTransactions() {
                 <div className="view-item">
                   <label>{t.amountReceived}</label>
                   <div className="view-value">
-                    {selectedPayment.amount_received != null
-                      ? `TZS ${formatPrice(selectedPayment.amount_received)}`
+                    {Number(getReceivedAmountForMethod(selectedPayment)) > 0
+                      ? `TZS ${formatPrice(getReceivedAmountForMethod(selectedPayment))}`
                       : '—'}
                   </div>
                 </div>
@@ -1156,7 +1546,7 @@ function CashierTransactions() {
                     TZS {formatPrice(
                       Math.max(0,
                         getTotalAmount(selectedPayment) -
-                        (Number(selectedPayment.amount_received) || 0)
+                        getReceivedAmountForMethod(selectedPayment)
                       )
                     )}
                   </div>

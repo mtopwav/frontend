@@ -33,6 +33,8 @@ function AccountantReports() {
   const [logoDataUrl, setLogoDataUrl] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [revenues, setRevenues] = useState([]);
+  /** 'both' | 'revenues' | 'expenses' — controls visible tables and print output */
+  const [reportTypeFilter, setReportTypeFilter] = useState('both');
 
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -156,6 +158,16 @@ function AccountantReports() {
       ? `Until ${dateTo}`
       : 'All time';
 
+  const showRevenues = reportTypeFilter === 'both' || reportTypeFilter === 'revenues';
+  const showExpenses = reportTypeFilter === 'both' || reportTypeFilter === 'expenses';
+
+  const reportScopeLabel =
+    reportTypeFilter === 'both'
+      ? 'Revenue & expenses'
+      : reportTypeFilter === 'revenues'
+      ? 'Revenues only'
+      : 'Expenses only';
+
   const handlePrintReports = () => {
     const printWindow = window.open('', '_blank', 'width=1000,height=700');
     if (!printWindow) {
@@ -234,12 +246,61 @@ function AccountantReports() {
             .join('') +
           '</tbody>';
 
+    const printTitleShort =
+      reportTypeFilter === 'both'
+        ? 'Revenue & Expenses'
+        : reportTypeFilter === 'revenues'
+        ? 'Revenue'
+        : 'Expenses';
+    const printHeading =
+      reportTypeFilter === 'both'
+        ? 'REVENUE & EXPENSES REPORT'
+        : reportTypeFilter === 'revenues'
+        ? 'REVENUE REPORT'
+        : 'EXPENSES REPORT';
+
+    const revenueSectionHtml =
+      showRevenues &&
+      `
+          <div class="tax-inv-section-title">Revenue</div>
+          <table class="tax-inv-table">
+            ${revenuesTableHeader}
+            ${revenuesRows}
+          </table>
+`;
+
+    const expensesSectionHtml =
+      showExpenses &&
+      `
+          <div class="tax-inv-section-title">Expenses</div>
+          <table class="tax-inv-table">
+            ${expensesTableHeader}
+            ${expensesRows}
+          </table>
+`;
+
+    const footerRowsHtml = [
+      showRevenues
+        ? `<div class="tax-inv-footer-row"><label>Total Revenue (TZS):</label> ${formatCurrency(totalRevenues)}</div>`
+        : '',
+      showExpenses
+        ? `<div class="tax-inv-footer-row"><label>Total Expenses (TZS):</label> ${formatCurrency(totalExpenses)}</div>`
+        : '',
+      showRevenues && showExpenses
+        ? `<div class="tax-inv-footer-row"><label>Net (Revenue − Expenses) (TZS):</label> ${
+            netAmount >= 0 ? formatCurrency(netAmount) : '- ' + formatCurrency(Math.abs(netAmount))
+          }</div>`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n            ');
+
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>Expenses & Revenue Report - Mamuya Auto Spare Parts</title>
+          <title>${printTitleShort} Report - Mamuya Auto Spare Parts</title>
           <style>
             * { box-sizing: border-box; }
             body {
@@ -348,31 +409,20 @@ function AccountantReports() {
               </div>
             </div>
             <div class="tax-inv-meta">
-              <p><strong>Report:</strong> Expenses & Revenue</p>
+              <p><strong>Report:</strong> ${printTitleShort}${reportTypeFilter === 'both' ? '' : ' only'}</p>
               <p><strong>Period:</strong> ${periodLabel}</p>
               <p><strong>Printed:</strong> ${new Date().toLocaleString('en-GB')}</p>
               <p><strong>Printed by:</strong> ${(user?.full_name || user?.username || 'Accountant').replace(/</g, '&lt;')}</p>
             </div>
           </div>
 
-          <h1 class="tax-inv-title">EXPENSES & REVENUE REPORT</h1>
+          <h1 class="tax-inv-title">${printHeading}</h1>
 
-          <div class="tax-inv-section-title">Expenses</div>
-          <table class="tax-inv-table">
-            ${expensesTableHeader}
-            ${expensesRows}
-          </table>
-
-          <div class="tax-inv-section-title">Revenue</div>
-          <table class="tax-inv-table">
-            ${revenuesTableHeader}
-            ${revenuesRows}
-          </table>
+          ${revenueSectionHtml || ''}
+          ${expensesSectionHtml || ''}
 
           <div class="tax-inv-footer">
-            <div class="tax-inv-footer-row"><label>Total Expenses (TZS):</label> ${formatCurrency(totalExpenses)}</div>
-            <div class="tax-inv-footer-row"><label>Total Revenue (TZS):</label> ${formatCurrency(totalRevenues)}</div>
-            <div class="tax-inv-footer-row"><label>Net (Revenue − Expenses) (TZS):</label> ${netAmount >= 0 ? formatCurrency(netAmount) : '- ' + formatCurrency(Math.abs(netAmount))}</div>
+            ${footerRowsHtml}
           </div>
 
           <p class="tax-inv-disclaimer">*This is a computer generated report, hence no signature is required.*</p>
@@ -498,7 +548,33 @@ function AccountantReports() {
                 </button>
               </div>
             ) : null}
-            <span className="reports-period-label">Showing: {periodLabel}</span>
+            <div className="reports-type-filter" role="group" aria-label="Report content">
+              <span className="reports-type-filter-label">Show</span>
+              <button
+                type="button"
+                className={'reports-type-btn' + (reportTypeFilter === 'both' ? ' active' : '')}
+                onClick={() => setReportTypeFilter('both')}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                className={'reports-type-btn' + (reportTypeFilter === 'revenues' ? ' active' : '')}
+                onClick={() => setReportTypeFilter('revenues')}
+              >
+                Revenues
+              </button>
+              <button
+                type="button"
+                className={'reports-type-btn' + (reportTypeFilter === 'expenses' ? ' active' : '')}
+                onClick={() => setReportTypeFilter('expenses')}
+              >
+                Expenses
+              </button>
+            </div>
+            <span className="reports-period-label">
+              Showing: {periodLabel} · {reportScopeLabel}
+            </span>
             <button
               onClick={handlePrintReports}
               className="action-btn print"
@@ -527,112 +603,124 @@ function AccountantReports() {
           </div>
 
           <div className="stats-grid reports-stats">
-            <div className="stat-card stat-danger reports-stat-card">
-              <div className="stat-info">
-                <h3 className="stat-title">Total Expenses</h3>
-                <p className="stat-value">TZS {formatCurrency(totalExpenses)}</p>
-                <span className="reports-stat-count">{filteredExpenses.length} record(s)</span>
+            {showExpenses && (
+              <div className="stat-card stat-danger reports-stat-card">
+                <div className="stat-info">
+                  <h3 className="stat-title">Total Expenses</h3>
+                  <p className="stat-value">TZS {formatCurrency(totalExpenses)}</p>
+                  <span className="reports-stat-count">{filteredExpenses.length} record(s)</span>
+                </div>
               </div>
-            </div>
-            <div className="stat-card stat-success reports-stat-card">
-              <div className="stat-info">
-                <h3 className="stat-title">Total Revenue</h3>
-                <p className="stat-value">TZS {formatCurrency(totalRevenues)}</p>
-                <span className="reports-stat-count">{filteredRevenues.length} record(s)</span>
+            )}
+            {showRevenues && (
+              <div className="stat-card stat-success reports-stat-card">
+                <div className="stat-info">
+                  <h3 className="stat-title">Total Revenue</h3>
+                  <p className="stat-value">TZS {formatCurrency(totalRevenues)}</p>
+                  <span className="reports-stat-count">{filteredRevenues.length} record(s)</span>
+                </div>
               </div>
-            </div>
-            <div className={`stat-card reports-stat-card reports-net-card ${netAmount >= 0 ? 'stat-success' : 'stat-danger'}`}>
-              <div className="stat-info">
-                <h3 className="stat-title">Net (Revenue − Expenses)</h3>
-                <p className="stat-value">{netAmount >= 0 ? 'TZS ' : '- TZS '}{formatCurrency(Math.abs(netAmount))}</p>
+            )}
+            {reportTypeFilter === 'both' && (
+              <div className={`stat-card reports-stat-card reports-net-card ${netAmount >= 0 ? 'stat-success' : 'stat-danger'}`}>
+                <div className="stat-info">
+                  <h3 className="stat-title">Net (Revenue − Expenses)</h3>
+                  <p className="stat-value">{netAmount >= 0 ? 'TZS ' : '- TZS '}{formatCurrency(Math.abs(netAmount))}</p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="reports-sections">
-            <section className="reports-section reports-expenses" aria-label="Expenses Report">
-              <div className="reports-section-header">
-                <h3 className="reports-section-title">
-                  <FaArrowDown className="reports-section-icon" /> Expenses Report
-                </h3>
-                <span className="reports-section-total amount-negative">TZS {formatCurrency(totalExpenses)}</span>
-              </div>
-              <div className="reports-table-wrap">
-                <table className="reports-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Description</th>
-                      <th>Category</th>
-                      <th>Amount (TZS)</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredExpenses.length === 0 ? (
+            {showRevenues && (
+              <section className="reports-section reports-revenues" aria-label="Revenue Report">
+                <div className="reports-section-header">
+                  <h3 className="reports-section-title">
+                    <FaArrowUp className="reports-section-icon" /> Revenue Report
+                  </h3>
+                  <span className="reports-section-total amount-positive">TZS {formatCurrency(totalRevenues)}</span>
+                </div>
+                <div className="reports-table-wrap">
+                  <table className="reports-table">
+                    <thead>
                       <tr>
-                        <td colSpan="5" className="no-data">No expenses in this period</td>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Category</th>
+                        <th>Amount (TZS)</th>
+                        <th>Payment method</th>
+                        <th>Status</th>
                       </tr>
-                    ) : (
-                      filteredExpenses.map((e) => (
-                        <tr key={e.id}>
-                          <td>{formatDate(e.date)}</td>
-                          <td className="reports-desc-cell">{e.description || '—'}</td>
-                          <td><span className="reports-category-badge">{e.category || '—'}</span></td>
-                          <td className="amount-negative">TZS {formatCurrency(e.amount)}</td>
-                          <td><span className={`status-badge ${e.status === 'Approved' ? 'completed' : 'pending'}`}>{e.status || '—'}</span></td>
+                    </thead>
+                    <tbody>
+                      {filteredRevenues.length === 0 ? (
+                        <tr>
+                          <td colSpan="6" className="no-data">No revenues in this period</td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                      ) : (
+                        filteredRevenues.map((r) => (
+                          <tr key={r.id}>
+                            <td>{formatDate(r.date)}</td>
+                            <td className="reports-desc-cell">{r.description || '—'}</td>
+                            <td><span className="reports-category-badge">{r.category || '—'}</span></td>
+                            <td className="amount-positive">TZS {formatCurrency(r.amount)}</td>
+                            <td>{r.payment_method || '—'}</td>
+                            <td><span className={`status-badge ${r.status === 'Approved' ? 'completed' : 'pending'}`}>{r.status || '—'}</span></td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
 
-            <div className="reports-divider" aria-hidden="true">
-              <span className="reports-divider-label">Revenues</span>
-            </div>
-
-            <section className="reports-section reports-revenues" aria-label="Revenue Report">
-              <div className="reports-section-header">
-                <h3 className="reports-section-title">
-                  <FaArrowUp className="reports-section-icon" /> Revenue Report
-                </h3>
-                <span className="reports-section-total amount-positive">TZS {formatCurrency(totalRevenues)}</span>
+            {showRevenues && showExpenses && (
+              <div className="reports-divider" aria-hidden="true">
+                <span className="reports-divider-label">Expenses</span>
               </div>
-              <div className="reports-table-wrap">
-                <table className="reports-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Description</th>
-                      <th>Category</th>
-                      <th>Amount (TZS)</th>
-                      <th>Payment method</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRevenues.length === 0 ? (
+            )}
+
+            {showExpenses && (
+              <section className="reports-section reports-expenses" aria-label="Expenses Report">
+                <div className="reports-section-header">
+                  <h3 className="reports-section-title">
+                    <FaArrowDown className="reports-section-icon" /> Expenses Report
+                  </h3>
+                  <span className="reports-section-total amount-negative">TZS {formatCurrency(totalExpenses)}</span>
+                </div>
+                <div className="reports-table-wrap">
+                  <table className="reports-table">
+                    <thead>
                       <tr>
-                        <td colSpan="6" className="no-data">No revenues in this period</td>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Category</th>
+                        <th>Amount (TZS)</th>
+                        <th>Status</th>
                       </tr>
-                    ) : (
-                      filteredRevenues.map((r) => (
-                        <tr key={r.id}>
-                          <td>{formatDate(r.date)}</td>
-                          <td className="reports-desc-cell">{r.description || '—'}</td>
-                          <td><span className="reports-category-badge">{r.category || '—'}</span></td>
-                          <td className="amount-positive">TZS {formatCurrency(r.amount)}</td>
-                          <td>{r.payment_method || '—'}</td>
-                          <td><span className={`status-badge ${r.status === 'Approved' ? 'completed' : 'pending'}`}>{r.status || '—'}</span></td>
+                    </thead>
+                    <tbody>
+                      {filteredExpenses.length === 0 ? (
+                        <tr>
+                          <td colSpan="5" className="no-data">No expenses in this period</td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                      ) : (
+                        filteredExpenses.map((e) => (
+                          <tr key={e.id}>
+                            <td>{formatDate(e.date)}</td>
+                            <td className="reports-desc-cell">{e.description || '—'}</td>
+                            <td><span className="reports-category-badge">{e.category || '—'}</span></td>
+                            <td className="amount-negative">TZS {formatCurrency(e.amount)}</td>
+                            <td><span className={`status-badge ${e.status === 'Approved' ? 'completed' : 'pending'}`}>{e.status || '—'}</span></td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
           </div>
         </div>
       </div>

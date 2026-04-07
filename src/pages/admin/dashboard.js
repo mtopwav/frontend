@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   FaChartLine, 
@@ -8,6 +8,7 @@ import {
   FaShoppingCart,
   FaBars,
   FaSignOutAlt,
+  FaChartBar,
   FaCog,
   FaUser,
   FaEnvelope,
@@ -45,8 +46,7 @@ function Dashboard() {
   const [recentActivities, setRecentActivities] = useState([]);
   const [todaySalesCount, setTodaySalesCount] = useState(0);
   const [todayPendingOrdersCount, setTodayPendingOrdersCount] = useState(0);
-  const [totalWholesaleValue, setTotalWholesaleValue] = useState(0);
-  const [totalRetailValue, setTotalRetailValue] = useState(0);
+  const [sparePartsList, setSparePartsList] = useState([]);
 
   useEffect(() => {
     // Get user data from storage
@@ -213,22 +213,7 @@ function Dashboard() {
 
           // Count total spare parts
           setTotalParts(spareParts.length);
-
-          // Calculate total wholesale and retail inventory values (price × quantity)
-          const wholesaleTotal = spareParts.reduce((sum, part) => {
-            const qty = Number(part.quantity) || 0;
-            const price = Number(part.wholesale_price ?? part.wholesalePrice) || 0;
-            return sum + qty * price;
-          }, 0);
-
-          const retailTotal = spareParts.reduce((sum, part) => {
-            const qty = Number(part.quantity) || 0;
-            const price = Number(part.retail_price ?? part.retailPrice) || 0;
-            return sum + qty * price;
-          }, 0);
-
-          setTotalWholesaleValue(wholesaleTotal);
-          setTotalRetailValue(retailTotal);
+          setSparePartsList(spareParts);
           
           // Calculate last week's parts count (parts created before 7 days ago)
           const today = new Date();
@@ -247,8 +232,7 @@ function Dashboard() {
       } catch (error) {
         console.error('Error fetching spare parts:', error);
         setTotalParts(0);
-        setTotalWholesaleValue(0);
-        setTotalRetailValue(0);
+        setSparePartsList([]);
         setLastWeekParts(0);
       }
     };
@@ -383,6 +367,37 @@ function Dashboard() {
     fetchRecentOperations();
   }, []);
 
+  /** Stock on hand: Σ (qty × wholesale_price) and Σ (qty × retail_price) per spare part. */
+  const inventoryStockTotals = useMemo(() => {
+    const parsePrice = (v) => {
+      if (v == null || v === '') return 0;
+      const n = parseFloat(String(v).replace(/,/g, ''));
+      return Number.isNaN(n) ? 0 : n;
+    };
+    let wholesale = 0;
+    let retail = 0;
+    for (const part of sparePartsList) {
+      const qty = Number(part.quantity) || 0;
+      wholesale += qty * parsePrice(part.wholesale_price ?? part.wholesalePrice);
+      retail += qty * parsePrice(part.retail_price ?? part.retailPrice);
+    }
+    return { wholesale, retail };
+  }, [sparePartsList]);
+
+  /** Approved payments only: amount_received split by stored price_type (wholesale vs retail/other). */
+  const amountReceivedByPriceType = useMemo(() => {
+    let wholesaleRecv = 0;
+    let retailRecv = 0;
+    for (const p of payments) {
+      if (String(p.status || '').trim() !== 'Approved') continue;
+      const recv = Number(p.amount_received) || 0;
+      const pt = String(p.price_type || '').trim().toLowerCase();
+      if (pt === 'wholesale') wholesaleRecv += recv;
+      else retailRecv += recv;
+    }
+    return { wholesaleRecv, retailRecv };
+  }, [payments]);
+
   // Show loading while checking authentication
   if (loading) {
     return (
@@ -468,8 +483,8 @@ function Dashboard() {
   const ordersChange = calculatePercentageChange(totalOrders, lastWeekOrders);
   const customersChange = calculatePercentageChange(totalCustomers, lastWeekCustomers);
 
-  // For total wholesale/retail inventory values, just show a neutral change indicator
-  const inventoryChange = { value: '—', isPositive: true };
+  const receivedLineWholesale = `${t.totalReceived || 'Total received'}: ${formatCurrency(amountReceivedByPriceType.wholesaleRecv)}`;
+  const receivedLineRetail = `${t.totalReceived || 'Total received'}: ${formatCurrency(amountReceivedByPriceType.retailRecv)}`;
 
   // Dashboard statistics
   const stats = [
@@ -507,17 +522,17 @@ function Dashboard() {
     },
     {
       title: t.totalWholesaleValue || 'Total Wholesale Value',
-      value: formatCurrency(totalWholesaleValue),
-      change: inventoryChange.value,
-      changePositive: inventoryChange.isPositive,
+      value: formatCurrency(inventoryStockTotals.wholesale),
+      change: receivedLineWholesale,
+      changePositive: true,
       icon: <FaMoneyBillAlt />,
       color: 'secondary'
     },
     {
       title: t.totalRetailValue || 'Total Retail Value',
-      value: formatCurrency(totalRetailValue),
-      change: inventoryChange.value,
-      changePositive: inventoryChange.isPositive,
+      value: formatCurrency(inventoryStockTotals.retail),
+      change: receivedLineRetail,
+      changePositive: true,
       icon: <FaMoneyBillAlt />,
       color: 'secondary'
     }
@@ -562,9 +577,20 @@ function Dashboard() {
             <FaMoneyBillAlt className="nav-icon" />
             <span>{t.finances}</span>
           </Link>
+          <Link
+            to="/admin/transactions"
+            className={'nav-item' + (window.location.pathname === '/admin/transactions' ? ' active' : '')}
+          >
+            <FaCalendarAlt className="nav-icon" />
+            <span>Transactions</span>
+          </Link>
           <Link to="/admin/messages" className="nav-item">
             <FaEnvelope className="nav-icon" />
             <span>{t.messages}</span>
+          </Link>
+          <Link to="/admin/reports" className="nav-item">
+            <FaChartBar className="nav-icon" />
+            <span>{t.reports || 'Reports'}</span>
           </Link>
           <Link to="/admin/settings" className="nav-item">
             <FaCog className="nav-icon" />

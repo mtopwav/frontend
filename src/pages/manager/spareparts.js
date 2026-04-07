@@ -19,6 +19,7 @@ import {
   FaPlus,
   FaTrashAlt,
   FaCalendarAlt,
+  FaPrint,
 } from 'react-icons/fa';
 import '../sales/payments.css';
 import './spareparts.css';
@@ -48,6 +49,7 @@ function ManagerSpareparts() {
   const [dataLoading, setDataLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [showLowStockOnly, setShowLowStockOnly] = useState(false);
   const [spareParts, setSpareParts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -210,7 +212,9 @@ function ManagerSpareparts() {
       (p.category_name && p.category_name.toLowerCase().includes(term)) ||
       (p.brand_name && p.brand_name.toLowerCase().includes(term));
     const matchesCategory = categoryFilter === 'All' || p.category_name === categoryFilter;
-    return matchesSearch && matchesCategory;
+    const qty = Number(p.quantity) || 0;
+    const matchesLowStock = !showLowStockOnly || qty < LOW_STOCK_THRESHOLD;
+    return matchesSearch && matchesCategory && matchesLowStock;
   });
 
   const sortedParts = [...filteredParts].sort((a, b) =>
@@ -219,6 +223,169 @@ function ManagerSpareparts() {
 
   const totalParts = spareParts.length;
   const lowStockCount = spareParts.filter((p) => (Number(p.quantity) || 0) < LOW_STOCK_THRESHOLD).length;
+
+  const handlePrintSpareparts = () => {
+    const reportWindow = window.open('', '_blank', 'width=1100,height=750');
+    if (!reportWindow) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Popup blocked',
+        text: 'Please allow popups to print the report.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
+
+    const safe = (v) => String(v ?? '').replace(/</g, '&lt;');
+    const logoPath = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    const logoUrl = logoPath
+      ? (logoPath.startsWith('http') ? logoPath : window.location.origin + (logoPath.startsWith('/') ? logoPath : '/' + logoPath))
+      : window.location.origin + '/logo192.png';
+    const printedAt = new Date().toLocaleString('en-GB');
+    const printedBy = safe(user?.full_name || user?.username || 'Manager');
+    const categoryLabel = categoryFilter === 'All' ? 'All categories' : capitalizeName(categoryFilter);
+    const scopeLabel = showLowStockOnly ? `Low stock only` : 'All stock';
+
+    const rowsHtml =
+      sortedParts.length === 0
+        ? `<tr><td colspan="6" class="no-data">No spare parts found</td></tr>`
+        : sortedParts
+            .map((p, idx) => {
+              const qty = Number(p.quantity) || 0;
+              const isLow = qty < LOW_STOCK_THRESHOLD;
+              return `
+                <tr>
+                  <td class="tc">${idx + 1}</td>
+                  <td class="tl">${safe(capitalizeName(p.part_name || '—'))}</td>
+                  <td class="tl">${safe(String(p.part_number || '—').toUpperCase())}</td>
+                  <td class="tl">${safe(capitalizeName(p.category_name || '—'))}</td>
+                  <td class="tl">${safe(String(p.brand_name || '—').toUpperCase())}</td>
+                  <td class="tr ${isLow ? 'qty-low' : ''}">${qty}</td>
+                </tr>
+              `;
+            })
+            .join('');
+
+    const totalQty = sortedParts.reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+    const lowQtyCount = sortedParts.filter((p) => (Number(p.quantity) || 0) < LOW_STOCK_THRESHOLD).length;
+
+    reportWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Spare Parts Inventory - Mamuya Auto Spare Parts</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+              max-width: 980px;
+              margin: 0 auto;
+              padding: 24px;
+              color: #222;
+              font-size: 11px;
+              line-height: 1.4;
+            }
+            .top {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 18px;
+              padding-bottom: 14px;
+              border-bottom: 2px solid #333;
+              gap: 16px;
+            }
+            .left { display: flex; gap: 16px; align-items: flex-start; flex: 1; }
+            .logo { max-height: 56px; max-width: 140px; object-fit: contain; }
+            .company h2 { margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 800; }
+            .company p { margin: 0; color: #444; font-size: 10px; line-height: 1.5; }
+            .meta { text-align: right; min-width: 220px; }
+            .meta p { margin: 0 0 6px 0; font-size: 11px; }
+            .title {
+              text-align: center;
+              font-size: 1.6rem;
+              font-weight: 800;
+              margin: 18px 0 14px;
+              letter-spacing: 0.05em;
+            }
+            .subtitle {
+              text-align: center;
+              margin: 0 0 18px;
+              color: #444;
+              font-size: 11px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              border: 1px solid #333;
+              font-size: 10px;
+            }
+            th, td { border: 1px solid #333; padding: 6px 8px; vertical-align: middle; }
+            th { background: #f0f0f0; font-weight: 700; text-align: center; }
+            .tc { text-align: center; }
+            .tr { text-align: right; }
+            .tl { text-align: left; }
+            .no-data { text-align: center; padding: 18px; color: #6c757d; }
+            .qty-low { color: #dc3545; font-weight: 700; }
+            .footer {
+              margin-top: 20px;
+              padding-top: 14px;
+              border-top: 1px solid #ccc;
+              font-size: 11px;
+            }
+            .footer-row { margin-bottom: 10px; }
+            .footer-row label { display: inline-block; min-width: 220px; font-weight: 700; }
+            @media print { body { padding: 16px; } .logo { max-height: 48px; } }
+          </style>
+        </head>
+        <body>
+          <div class="top">
+            <div class="left">
+              <img src="${safe(logoUrl)}" alt="Logo" class="logo" />
+              <div class="company">
+                <h2>Mamuya Auto Spare Parts</h2>
+                <p>Kilimanjaro, Tanzania<br />Phone: +255 22 123 4567</p>
+              </div>
+            </div>
+            <div class="meta">
+              <p><strong>Report:</strong> Spare Parts Inventory</p>
+              <p><strong>Category:</strong> ${safe(categoryLabel)}</p>
+              <p><strong>Scope:</strong> ${safe(scopeLabel)}</p>
+              <p><strong>Printed:</strong> ${safe(printedAt)}</p>
+              <p><strong>Printed by:</strong> ${printedBy}</p>
+            </div>
+          </div>
+
+          <h1 class="title">INVENTORY REPORT</h1>
+          <p class="subtitle">Showing ${sortedParts.length} item(s)</p>
+
+          <table>
+            <thead>
+              <tr>
+                <th class="tc">S.No</th>
+                <th class="tl">Part name</th>
+                <th class="tl">Part number</th>
+                <th class="tl">Category</th>
+                <th class="tl">Brand</th>
+                <th class="tr">Quantity</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+
+          <div class="footer">
+            <div class="footer-row"><label>Total items shown:</label> ${sortedParts.length}</div>
+          </div>
+        </body>
+      </html>
+    `);
+
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+  };
   const handleView = (part) => {
     setSelectedPart(part);
     setShowViewModal(true);
@@ -495,6 +662,14 @@ function ManagerSpareparts() {
                 ))}
               </select>
             </div>
+            <button
+              type="button"
+              className={`manager-low-stock-btn${showLowStockOnly ? ' active' : ''}`}
+              onClick={() => setShowLowStockOnly((v) => !v)}
+              title={`Show only low stock (quantity < ${LOW_STOCK_THRESHOLD})`}
+            >
+              Low Stock
+            </button>
           </div>
 
           <div className="stats-row manager-stats-row">
@@ -515,9 +690,14 @@ function ManagerSpareparts() {
           <section className="manager-transactions-table-section manager-spareparts-section">
             <div className="manager-spareparts-section-header">
               <h3 className="manager-section-title">{t.inventory}</h3>
-              <button type="button" className="manager-add-spares-btn" onClick={openAddModal}>
-                <FaPlus /> {t.addSpares}
-              </button>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button type="button" className="action-btn print" onClick={handlePrintSpareparts}>
+                  <FaPrint /> {t.print || 'Print'}
+                </button>
+                <button type="button" className="manager-add-spares-btn" onClick={openAddModal}>
+                  <FaPlus /> {t.addSpares}
+                </button>
+              </div>
             </div>
             <div className="table-container">
               <table className="payments-table manager-spareparts-table">

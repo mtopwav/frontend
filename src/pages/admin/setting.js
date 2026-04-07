@@ -9,6 +9,7 @@ import {
   FaShoppingCart,
   FaBars,
   FaSignOutAlt,
+  FaChartBar,
   FaCog,
   FaUser,
   FaEnvelope,
@@ -367,9 +368,20 @@ function Settings() {
             <FaMoneyBillAlt className="nav-icon" />
             <span>{t.finances}</span>
           </Link>
+          <Link
+            to="/admin/transactions"
+            className={'nav-item' + (window.location.pathname === '/admin/transactions' ? ' active' : '')}
+          >
+            <FaCalendarAlt className="nav-icon" />
+            <span>Transactions</span>
+          </Link>
           <Link to="/admin/messages" className="nav-item">
             <FaEnvelope className="nav-icon" />
             <span>{t.messages}</span>
+          </Link>
+          <Link to="/admin/reports" className="nav-item">
+            <FaChartBar className="nav-icon" />
+            <span>{t.reports || 'Reports'}</span>
           </Link>
           <Link to="/admin/settings" className="nav-item active">
             <FaCog className="nav-icon" />

@@ -17,6 +17,7 @@ import {
   FaPrint,
   FaReceipt,
   FaCalendarAlt,
+  FaMoneyBillWave,
   FaEye,
   FaCreditCard,
   FaEdit
@@ -29,6 +30,27 @@ import logo from '../../../images/logo.png';
 import { getPayments, updatePaymentDetails, returnPayment } from '../../../services/api';
 import { formatDateTime, getCurrentDateTime } from '../../../utils/dateTime';
 import { useTranslation } from '../../../utils/useTranslation';
+import { buildReceiptPrintDocument } from '../../../utils/receiptPrintHtml';
+
+/**
+ * Add the entered amount to the DB channel column that matches payment method.
+ * Loan/Credit Card do not write to channel columns.
+ */
+function mergeReceiptPaymentChannelTotals(payment, paymentMethod, addAmount) {
+  const add = Number(addAmount) || 0;
+  let cash = Number(payment.cash) || 0;
+  let bank_transfer = Number(payment.bank_transfer) || 0;
+  let airtel_money = Number(payment.airtel_money) || 0;
+  let mpesa = Number(payment.mpesa) || 0;
+  let mix_by_yas = Number(payment.mix_by_yas) || 0;
+  const m = String(paymentMethod || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (m === 'cash') cash += add;
+  else if (m === 'bank transfer') bank_transfer += add;
+  else if (m === 'airtel money') airtel_money += add;
+  else if (m === 'm-pesa' || m === 'mpesa') mpesa += add;
+  else if (m.includes('mix') && m.includes('yas')) mix_by_yas += add;
+  return { cash, bank_transfer, airtel_money, mpesa, mix_by_yas };
+}
 
 function CashierReceipts() {
   const navigate = useNavigate();
@@ -38,14 +60,17 @@ function CashierReceipts() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('Day'); // 'All' | 'Day' | 'Week' | 'Month'
-  const [statusFilter, setStatusFilter] = useState('All'); // 'All' | 'Pending' | 'Approved' | 'Rejected'
   const [receipts, setReceipts] = useState([]);
   const [currentDateTime, setCurrentDateTime] = useState(getCurrentDateTime());
   const [showViewModal, setShowViewModal] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editAmountReceived, setEditAmountReceived] = useState('');
-  const [editPaymentMethod, setEditPaymentMethod] = useState('');
+  const [splitCashInput, setSplitCashInput] = useState('');
+  const [splitBankInput, setSplitBankInput] = useState('');
+  const [splitAirtelInput, setSplitAirtelInput] = useState('');
+  const [splitMpesaInput, setSplitMpesaInput] = useState('');
+  const [splitYasInput, setSplitYasInput] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [logoDataUrl, setLogoDataUrl] = useState(null);
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -200,39 +225,18 @@ function CashierReceipts() {
     });
   };
 
-  // Helpers for printable receipt (same style as manager/transactions)
-  const formatCurrency = (amount) => {
-    const num = parseFloat(amount) || 0;
-    return new Intl.NumberFormat('en-TZ', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(num);
-  };
-
-  const formatDateInvoice = (dateStr) => {
-    if (!dateStr) return '—';
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    const day = d.getDate();
-    const month = d.getMonth() + 1;
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
-  };
-
-  const numberToWords = (n) => {
-    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-    const num = Math.floor(parseFloat(n) || 0);
-    if (num === 0) return 'Zero';
-    const g = (x) => {
-      if (x < 20) return ones[x];
-      if (x < 100) return tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
-      return ones[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' + g(x % 100) : '');
-    };
-    if (num < 1000) return g(num);
-    if (num < 1000000) return g(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + g(num % 1000) : '');
-    if (num < 1000000000) return g(Math.floor(num / 1000000)) + ' Million' + (num % 1000000 ? ' ' + numberToWords(num % 1000000) : '');
-    return g(Math.floor(num / 1000000000)) + ' Billion' + (num % 1000000000 ? ' ' + numberToWords(num % 1000000000) : '');
+  // For split payments, prefer channel columns over single payment_method text.
+  const getAppliedPaymentMethods = (payment) => {
+    const channels = [
+      { label: 'Cash', value: Number(payment?.cash) || 0 },
+      { label: 'Bank Transfer', value: Number(payment?.bank_transfer) || 0 },
+      { label: 'Airtel Money', value: Number(payment?.airtel_money) || 0 },
+      { label: 'M-Pesa', value: Number(payment?.mpesa) || 0 },
+      { label: 'Mix By Yas', value: Number(payment?.mix_by_yas) || 0 },
+    ].filter((c) => c.value > 0);
+    if (channels.length > 0) return channels;
+    const fallback = String(payment?.payment_method || '').trim();
+    return fallback ? [{ label: fallback, value: Number(payment?.amount_received) || 0 }] : [];
   };
 
   const getTotalAmount = (receipt) => {
@@ -292,7 +296,11 @@ function CashierReceipts() {
     setSelectedPayment(payment);
     // Start with an empty editable field; keep original amount visible in the read-only field
     setEditAmountReceived('');
-    setEditPaymentMethod(payment.payment_method || '');
+    setSplitCashInput('');
+    setSplitBankInput('');
+    setSplitAirtelInput('');
+    setSplitMpesaInput('');
+    setSplitYasInput('');
     setShowEditModal(true);
   };
 
@@ -312,7 +320,14 @@ function CashierReceipts() {
 
   const handleSaveEdit = async () => {
     if (!selectedPayment) return;
-    const amountToAdd = parseCommaNumber(editAmountReceived);
+    const splitCash = parseCommaNumber(splitCashInput);
+    const splitBank = parseCommaNumber(splitBankInput);
+    const splitAirtel = parseCommaNumber(splitAirtelInput);
+    const splitMpesa = parseCommaNumber(splitMpesaInput);
+    const splitYas = parseCommaNumber(splitYasInput);
+    const splitTotal = splitCash + splitBank + splitAirtel + splitMpesa + splitYas;
+    const useSplit = splitTotal > 0;
+    const amountToAdd = useSplit ? splitTotal : parseCommaNumber(editAmountReceived);
     if (amountToAdd <= 0) {
       Swal.fire({
         icon: 'warning',
@@ -326,12 +341,37 @@ function CashierReceipts() {
     const newAmountReceived = currentAmountReceived + amountToAdd;
     const total = getTotalAmount(selectedPayment);
     const amountRemain = Math.max(0, total - newAmountReceived);
+    const methodsUsed = [
+      splitCash > 0 ? 'Cash' : null,
+      splitBank > 0 ? 'Bank Transfer' : null,
+      splitAirtel > 0 ? 'Airtel Money' : null,
+      splitMpesa > 0 ? 'M-Pesa' : null,
+      splitYas > 0 ? 'Mix By Yas' : null,
+    ].filter(Boolean);
+    const effectivePaymentMethod = useSplit
+      ? (methodsUsed.length > 1 ? 'Mixed' : methodsUsed[0])
+      : (selectedPayment.payment_method || null);
+    const channelTotals = useSplit
+      ? {
+          cash: (Number(selectedPayment.cash) || 0) + splitCash,
+          bank_transfer: (Number(selectedPayment.bank_transfer) || 0) + splitBank,
+          airtel_money: (Number(selectedPayment.airtel_money) || 0) + splitAirtel,
+          mpesa: (Number(selectedPayment.mpesa) || 0) + splitMpesa,
+          mix_by_yas: (Number(selectedPayment.mix_by_yas) || 0) + splitYas,
+        }
+      : mergeReceiptPaymentChannelTotals(selectedPayment, effectivePaymentMethod, amountToAdd);
     setEditSaving(true);
     try {
       const response = await updatePaymentDetails(selectedPayment.id, {
         amount_received: newAmountReceived,
         amount_remain: amountRemain,
-        payment_method: editPaymentMethod || selectedPayment.payment_method || null
+        payment_method: effectivePaymentMethod,
+        payment_type: selectedPayment.payment_type,
+        cash: channelTotals.cash,
+        bank_transfer: channelTotals.bank_transfer,
+        airtel_money: channelTotals.airtel_money,
+        mpesa: channelTotals.mpesa,
+        mix_by_yas: channelTotals.mix_by_yas,
       });
       if (!response.success) throw new Error(response.message || 'Failed to update');
       
@@ -422,199 +462,11 @@ function CashierReceipts() {
   };
 
   const handlePrint = (receipt) => {
-    const totalAmount = (() => {
-      if (receipt.items && receipt.items.length > 0) {
-        return receipt.items.reduce((sum, item) => {
-          const qty = Number(item.quantity) || 0;
-          const unit = Number(item.unit_price) || 0;
-          const itemTotal =
-            item.total_amount != null && item.total_amount !== undefined
-              ? Number(item.total_amount) || 0
-              : qty * unit;
-          return sum + itemTotal;
-        }, 0);
-      }
-      const qty = Number(receipt.quantity) || 0;
-      const unit = Number(receipt.unit_price) || 0;
-      return qty * unit;
-    })();
-
-    const dateStr = formatDateInvoice(receipt.created_at);
-    const trnNo = '182-150-770';
-    const invNum = `RCPT-${receipt.id}`;
-    const customerName = (receipt.customer_name || '—').replace(/</g, '&lt;');
-    const customerPhone = (receipt.customer_phone || '—').replace(/</g, '&lt;');
-
-    let items = [];
-    if (receipt.items && receipt.items.length > 0) {
-      items = receipt.items;
-    } else {
-      items = [{
-        part_name: receipt.sparepart_name || '—',
-        part_number: receipt.sparepart_number || '—',
-        quantity: receipt.quantity || 1,
-        unit_price: receipt.unit_price || 0,
-        total_amount: parseFloat(receipt.unit_price || 0) * (parseInt(receipt.quantity || 1, 10) || 1)
-      }];
-    }
-
-    const hasItems = items.length > 0;
-    const subTotal = hasItems
-      ? items.reduce((s, it) => s + (parseFloat(it.unit_price) || 0) * (parseInt(it.quantity, 10) || 1), 0)
-      : totalAmount;
-    const discountAmt = parseFloat(receipt.discount_amount) || 0;
-    const totalAmountFinal = Math.max(0, subTotal - discountAmt);
-    const amountReceived = Number(receipt.amount_received) || 0;
-    const amountRemain = Math.max(0, totalAmountFinal - amountReceived);
-
     const logoUrl = typeof logo === 'string' && logo
       ? (logo.startsWith('http') ? logo : window.location.origin + (logo.startsWith('/') ? logo : '/' + logo))
       : '';
     const logoSrc = logoDataUrl || logoUrl;
-    const logoImg = logoSrc ? `<img src="${String(logoSrc).replace(/"/g, '&quot;')}" alt="Logo" class="tax-inv-logo" />` : '';
-
-    const itemRows = hasItems
-      ? items.map((it, i) => {
-          const qty = parseInt(it.quantity, 10) || 1;
-          const rate = parseFloat(it.unit_price) || 0;
-          const amount = rate * qty;
-          return `<tr>
-            <td class="tc">${i + 1}</td>
-            <td>${(it.part_name || it.sparepart_name || '—').replace(/</g, '&lt;')}</td>
-            <td>${String(it.part_number || it.sparepart_number || '—').toUpperCase().replace(/</g, '&lt;')}</td>
-            <td class="tr">${qty}</td>
-            <td class="tr">${formatCurrency(rate)}</td>
-            <td>PCS</td>
-            <td class="tr">${formatCurrency(amount)}</td>
-            <td class="tr">${formatCurrency(amount)}</td>
-          </tr>`;
-        }).join('')
-      : `<tr>
-          <td class="tc">1</td>
-          <td>—</td>
-          <td>—</td>
-          <td class="tr">1</td>
-          <td class="tr">${formatCurrency(totalAmount)}</td>
-          <td>PCS</td>
-          <td class="tr">${formatCurrency(totalAmount)}</td>
-          <td class="tr">${formatCurrency(totalAmount)}</td>
-        </tr>`;
-
-    const amountInWords = numberToWords(Math.floor(totalAmountFinal)) + ' TZS Only';
-
-    const printContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Receipt ${invNum}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; color: #222; font-size: 11px; line-height: 1.4; }
-    .tax-inv-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 2px solid #333; }
-    .tax-inv-left { display: flex; align-items: flex-start; gap: 20px; flex: 1; }
-    .tax-inv-logo { max-height: 60px; max-width: 140px; object-fit: contain; }
-    .tax-inv-company { flex: 1; }
-    .tax-inv-company h2 { margin: 0 0 10px 0; font-size: 1.15rem; font-weight: 700; color: #111; letter-spacing: 0.02em; }
-    .tax-inv-address { margin: 0; color: #444; font-size: 10px; line-height: 1.5; }
-    .tax-inv-contact { margin-top: 8px; font-size: 10px; color: #555; }
-    .tax-inv-contact span { margin-right: 16px; }
-    .tax-inv-meta { text-align: right; min-width: 180px; }
-    .tax-inv-meta p { margin: 0 0 6px 0; font-size: 11px; }
-    .tax-inv-title { text-align: center; font-size: 1.6rem; font-weight: 700; margin: 24px 0; letter-spacing: 0.05em; }
-    .tax-inv-customer { margin-bottom: 18px; padding: 8px 0; }
-    .tax-inv-customer strong { display: inline-block; min-width: 130px; font-size: 11px; }
-    .tax-inv-table { width: 100%; border-collapse: collapse; margin: 0 0 20px 0; font-size: 10px; border: 1px solid #333; }
-    .tax-inv-table th, .tax-inv-table td { border: 1px solid #333; padding: 6px 8px; vertical-align: middle; }
-    .tax-inv-table th { background: #f0f0f0; font-weight: 700; text-align: center; font-size: 10px; }
-    .tax-inv-table th.tl { text-align: left; }
-    .tax-inv-table th .sub { display: block; font-weight: 400; font-size: 9px; color: #444; margin-top: 1px; }
-    .tax-inv-table .tc { text-align: center; }
-    .tax-inv-table .tr { text-align: right; }
-    .tax-inv-table .tl { text-align: left; }
-    .tax-inv-table tbody tr { background: #fff; }
-    .tax-inv-table .total-row td { font-weight: 600; background: #f0f0f0; }
-    .tax-inv-table .total-row.total-first td { border-top: 2px solid #333; }
-    .tax-inv-table .total-final td { font-weight: 700; font-size: 11px; background: #e8e8e8; }
-    .tax-inv-table .col-labels td { border: 1px solid #333; border-top: none; background: #fff; font-size: 9px; color: #444; padding: 4px 8px; text-align: right; }
-    .tax-inv-footer { margin-top: 28px; font-size: 11px; border-top: 1px solid #ccc; padding-top: 16px; }
-    .tax-inv-footer-row { margin-bottom: 12px; }
-    .tax-inv-footer-row label { display: inline-block; min-width: 180px; font-weight: 600; }
-    .tax-inv-disclaimer { margin-top: 28px; font-style: italic; color: #666; font-size: 10px; }
-    @media print { body { padding: 16px; } .tax-inv-logo { max-height: 52px; } }
-  </style>
-</head>
-<body>
-  <div class="tax-inv-top">
-    <div class="tax-inv-left">
-      ${logoImg}
-      <div class="tax-inv-company">
-        <h2>Mamuya Auto Spare Parts</h2>
-        <p class="tax-inv-address">Kilimanjaro, Tanzania</p>
-        <div class="tax-inv-contact">
-          <span>Tel: +255 757171337</span>
-        </div>
-      </div>
-    </div>
-    <div class="tax-inv-meta">
-      <p><strong>TRN NO:</strong> ${(trnNo).replace(/</g, '&lt;')}</p>
-      <p><strong>Receipt No:</strong> ${invNum}</p>
-      <p><strong>Date:</strong> ${dateStr}</p>
-    </div>
-  </div>
-
-  <h1 class="tax-inv-title">RECEIPT</h1>
-
-  <div class="tax-inv-customer">
-    <strong>Customer Name:</strong> ${customerName}<br />
-    <strong>Phone:</strong> ${customerPhone}
-  </div>
-
-  <table class="tax-inv-table">
-    <thead>
-      <tr>
-        <th style="width:4%">Sr.No.</th>
-        <th style="width:22%" class="tl">Description</th>
-        <th style="width:11%" class="tl">Part No.</th>
-        <th style="width:7%">Quantity</th>
-        <th style="width:10%"><span>Price</span><span class="sub">TZS</span></th>
-        <th style="width:6%">Per</th>
-        <th style="width:11%"><span>Amount</span><span class="sub">TZS</span></th>
-        <th style="width:12%"><span>Total Amount</span><span class="sub">TZS</span></th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemRows}
-      <tr class="total-row total-first">
-        <td colspan="7" class="tr" style="font-weight:600;">Sub Total</td>
-        <td class="tr">${formatCurrency(subTotal)}</td>
-      </tr>
-      <tr class="total-row">
-        <td colspan="7" class="tr" style="font-weight:600;">Discount</td>
-        <td class="tr">-${formatCurrency(discountAmt)}</td>
-      </tr>
-      <tr class="total-row">
-        <td colspan="7" class="tr" style="font-weight:600;">Amount Received</td>
-        <td class="tr">${formatCurrency(amountReceived)}</td>
-      </tr>
-      <tr class="total-row">
-        <td colspan="7" class="tr" style="font-weight:600;">Amount Remain</td>
-        <td class="tr">${formatCurrency(amountRemain)}</td>
-      </tr>
-      <tr class="total-row total-final">
-        <td colspan="7" class="tr" style="font-weight:700;">Total Received</td>
-        <td class="tr">${formatCurrency(amountReceived)}</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <div class="tax-inv-footer">
-    <div class="tax-inv-footer-row"><label>TOTAL AMOUNT IN WORDS :</label> ${amountInWords}</div>
-  </div>
-
-  <p class="tax-inv-disclaimer">*This is a computer generated receipt, hence no signature is required.*</p>
-</body>
-</html>`;
+    const printContent = buildReceiptPrintDocument(receipt, logoSrc);
 
     const printWindow = window.open('', '_blank', 'width=900,height=600');
     if (!printWindow) {
@@ -667,10 +519,7 @@ function CashierReceipts() {
     return true; // 'All'
   };
 
-  const filteredReceipts = receipts.filter((r) => {
-    if (r.status === 'Pending') return false;
-    if (!isReceiptInDateRange(r.created_at)) return false;
-    if (statusFilter !== 'All' && r.status !== statusFilter) return false;
+  const receiptMatchesSearch = (r) => {
     const term = searchTerm.toLowerCase().trim();
     if (!term) return true;
     return (
@@ -680,9 +529,54 @@ function CashierReceipts() {
       (r.sparepart_number && r.sparepart_number.toLowerCase().includes(term)) ||
       String(r.id).includes(searchTerm)
     );
+  };
+
+  /** Receipts table: approved transactions only (date + search apply). */
+  const filteredReceipts = receipts.filter((r) => {
+    if (String(r.status || '').trim() !== 'Approved') return false;
+    if (!isReceiptInDateRange(r.created_at)) return false;
+    return receiptMatchesSearch(r);
   });
 
-  const returnsCount = filteredReceipts.filter((r) => r.status === 'Returned').length;
+  const returnsCount = receipts.filter((r) => {
+    if (String(r.status || '').trim() !== 'Returned') return false;
+    if (!isReceiptInDateRange(r.created_at)) return false;
+    return receiptMatchesSearch(r);
+  }).length;
+
+  const isLoanPaymentMethod = (method) => {
+    const raw = String(method || '').toLowerCase().trim();
+    if (!raw) return false;
+    return raw === 'loan' || raw.includes('loan');
+  };
+
+  const getAmountRemainForReceipt = (p) => {
+    const dbRemain = p.amount_remain != null ? Number(p.amount_remain) : null;
+    if (dbRemain != null && !Number.isNaN(dbRemain)) return dbRemain;
+    const total = Number(p.total_amount) || 0;
+    const discount = Number(p.discount_amount) || 0;
+    const received = Number(p.amount_received) || 0;
+    return Math.max(0, total - discount - received);
+  };
+
+  // Loan paid: Approved + loan method + amount_received > 0 + positive amount due.
+  // Counts full settlement (remain === 0) or partial repayment (remain > 0).
+  const loanPaidTotal = filteredReceipts
+    .filter((r) => {
+      const received = Number(r.amount_received) || 0;
+      if (received <= 0) return false;
+      if (!isLoanPaymentMethod(r.payment_method)) return false;
+      const total = Number(r.total_amount) || 0;
+      const discount = Number(r.discount_amount) || 0;
+      const netDue = Math.max(0, total - discount);
+      if (netDue <= 0) return false;
+      const remain = getAmountRemainForReceipt(r);
+      if (Number.isNaN(remain)) return false;
+      const loanFullyPaid = remain === 0;
+      const debtReduced = remain > 0;
+      return loanFullyPaid || debtReduced;
+    })
+    .reduce((sum, r) => sum + (Number(r.amount_received) || 0), 0);
 
   return (
     <div className="payments-container receipts-page">
@@ -704,7 +598,11 @@ function CashierReceipts() {
           </Link>
           <Link to="/finance/cashier/receipts" className="nav-item active">
             <FaFileInvoice className="nav-icon" />
-            <span>{t.receiptsLabel || 'Receipts'}</span>
+            <span>{t.payments || 'Payments'}</span>
+          </Link>
+          <Link to="/finance/cashier/loans" className="nav-item">
+            <FaMoneyBillWave className="nav-icon" />
+            <span>{t.loans || 'Loans'}</span>
           </Link>
           <Link to="/finance/cashier/reports" className="nav-item">
             <FaChartBar className="nav-icon" />
@@ -779,18 +677,6 @@ function CashierReceipts() {
                 <option value="Month">{t.thisMonth}</option>
               </select>
             </div>
-            <div className="filter-box">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="status-filter"
-              >
-                <option value="All">{t.allStatus}</option>
-                <option value="Pending">{t.pending}</option>
-                <option value="Approved">{t.approved}</option>
-                <option value="Rejected">{t.rejected}</option>
-              </select>
-            </div>
           </div>
 
           {/* Summary */}
@@ -815,6 +701,14 @@ function CashierReceipts() {
                 <p className="stat-value">{returnsCount}</p>
               </div>
             </div>
+            <div className="stat-card">
+              <div className="stat-info">
+                <h3>Loan Paid</h3>
+                <p className="stat-value">
+                  TZS {formatPrice(loanPaidTotal)}
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Payments Table */}
@@ -826,6 +720,7 @@ function CashierReceipts() {
                   <th>{t.receiptNum}</th>
                   <th>{t.customer}</th>
                   <th>{t.sparePart}</th>
+                  <th>{t.paymentType || 'Payment Type'}</th>
                   <th>{t.totalAmount}</th>
                   <th>{t.amountReceived}</th>
                   <th>{t.amountRemain}</th>
@@ -837,7 +732,7 @@ function CashierReceipts() {
               <tbody>
                 {filteredReceipts.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="no-data">
+                    <td colSpan="11" className="no-data">
                       {t.noPaymentsFound}
                     </td>
                   </tr>
@@ -919,6 +814,11 @@ function CashierReceipts() {
                           </div>
                         )}
                       </td>
+                      <td>
+                        <span className="payment-method-badge">
+                          {String(r.payment_type || '—').trim() || '—'}
+                        </span>
+                      </td>
                       <td className="amount-cell">
                         TZS {formatPrice(getTotalAmount(r))}
                       </td>
@@ -940,7 +840,13 @@ function CashierReceipts() {
                       </td>
                       <td>
                         <span className="payment-method-badge">
-                          {r.payment_method || '—'}
+                          {getAppliedPaymentMethods(r).length > 0
+                            ? getAppliedPaymentMethods(r).map((m, idx) => (
+                                <span key={idx} style={{ display: 'block' }}>
+                                  {m.label}{m.value > 0 ? ` ${formatPrice(m.value)}` : ''}
+                                </span>
+                              ))
+                            : '—'}
                         </span>
                       </td>
                       <td>{formatDateTime(r.created_at)}</td>
@@ -1026,7 +932,15 @@ function CashierReceipts() {
                 <div className="view-item">
                   <label><FaCreditCard /> {t.paymentMethod}</label>
                   <div className="view-value">
-                    <span className="payment-method-badge">{selectedPayment.payment_method || '—'}</span>
+                    <span className="payment-method-badge">
+                      {getAppliedPaymentMethods(selectedPayment).length > 0
+                        ? getAppliedPaymentMethods(selectedPayment).map((m, idx) => (
+                            <span key={idx} style={{ display: 'block' }}>
+                              {m.label}{m.value > 0 ? ` ${formatPrice(m.value)}` : ''}
+                            </span>
+                          ))
+                        : '—'}
+                    </span>
                   </div>
                 </div>
                 <div className="view-item">
@@ -1114,11 +1028,9 @@ function CashierReceipts() {
                   />
                 </div>
                 <div className="view-item">
-                  <label>{t.paymentMethod}</label>
-                  <select
-                    className="form-control"
-                    value={editPaymentMethod}
-                    onChange={(e) => setEditPaymentMethod(e.target.value)}
+                  <label>{t.paymentType || 'Payment Type'}</label>
+                  <div
+                    className="view-value"
                     style={{
                       width: '100%',
                       padding: '12px 15px',
@@ -1126,17 +1038,37 @@ function CashierReceipts() {
                       borderRadius: '5px',
                       fontSize: '1rem',
                       marginTop: '8px',
-                      backgroundColor: '#ffffff'
+                      backgroundColor: '#f8f9fa',
+                      color: '#495057'
                     }}
                   >
-                    <option value="Cash">Cash</option>
-                    <option value="M-Pesa">M-Pesa</option>
-                    <option value="Mix By Yas">Mix By Yas</option>
-                    <option value="Airtel Money">Airtel Money</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="Credit Card">Credit Card</option>
-                    <option value="Credit Card">Loan</option>
-                  </select>
+                    {String(selectedPayment.payment_type || '—').trim() || '—'}
+                  </div>
+                </div>
+                <div className="view-item">
+                  <label>{t.paymentMethod}</label>
+                  <div
+                    className="view-value"
+                    title="Payment method cannot be changed when editing"
+                    style={{
+                      width: '100%',
+                      padding: '12px 15px',
+                      border: '1px solid #ced4da',
+                      borderRadius: '5px',
+                      fontSize: '1rem',
+                      marginTop: '8px',
+                      backgroundColor: '#f8f9fa',
+                      color: '#495057'
+                    }}
+                  >
+                    {getAppliedPaymentMethods(selectedPayment).length > 0
+                      ? getAppliedPaymentMethods(selectedPayment).map((m, idx) => (
+                          <span key={idx} style={{ display: 'block' }}>
+                            {m.label}{m.value > 0 ? ` ${formatPrice(m.value)}` : ''}
+                          </span>
+                        ))
+                      : (String(selectedPayment.payment_method || '—').trim() || '—')}
+                  </div>
                 </div>
                 <div className="view-item">
                   <label>{t.amountReceived}</label>
@@ -1163,12 +1095,26 @@ function CashierReceipts() {
                   />
                 </div>
                 <div className="view-item">
+                  <label>Split payment (optional)</label>
+                  <div className="view-value" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <input type="text" inputMode="decimal" className="form-control" placeholder="Cash" value={splitCashInput} onChange={(e) => setSplitCashInput(e.target.value.replace(/[^\d.]/g, ''))} />
+                    <input type="text" inputMode="decimal" className="form-control" placeholder="Bank Transfer" value={splitBankInput} onChange={(e) => setSplitBankInput(e.target.value.replace(/[^\d.]/g, ''))} />
+                    <input type="text" inputMode="decimal" className="form-control" placeholder="Airtel Money" value={splitAirtelInput} onChange={(e) => setSplitAirtelInput(e.target.value.replace(/[^\d.]/g, ''))} />
+                    <input type="text" inputMode="decimal" className="form-control" placeholder="M-Pesa" value={splitMpesaInput} onChange={(e) => setSplitMpesaInput(e.target.value.replace(/[^\d.]/g, ''))} />
+                    <input type="text" inputMode="decimal" className="form-control" placeholder="Mix By Yas" value={splitYasInput} onChange={(e) => setSplitYasInput(e.target.value.replace(/[^\d.]/g, ''))} />
+                  </div>
+                </div>
+                <div className="view-item">
                   <label>Amount Remain</label>
                   <div className="view-value" style={{ fontWeight: 'bold', fontSize: '1.1em' }}>
                     TZS {formatPrice(
                       Math.max(
                         0,
-                        getTotalAmount(selectedPayment) - parseCommaNumber(editAmountReceived)
+                        getTotalAmount(selectedPayment) - (
+                          (parseCommaNumber(splitCashInput) + parseCommaNumber(splitBankInput) + parseCommaNumber(splitAirtelInput) + parseCommaNumber(splitMpesaInput) + parseCommaNumber(splitYasInput)) > 0
+                            ? (parseCommaNumber(splitCashInput) + parseCommaNumber(splitBankInput) + parseCommaNumber(splitAirtelInput) + parseCommaNumber(splitMpesaInput) + parseCommaNumber(splitYasInput))
+                            : parseCommaNumber(editAmountReceived)
+                        )
                       )
                     )}
                   </div>

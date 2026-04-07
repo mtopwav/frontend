@@ -27,6 +27,8 @@ import LanguageSelector from '../../../components/LanguageSelector';
 
 const REVENUE_CATEGORIES = ['', 'Sales', 'Services', 'Rent Income', 'Interest', 'Other'];
 
+const REVENUE_PAYMENT_METHODS = ['Cash', 'Bank Transfer', 'Mobile Payment'];
+
 function AccountantRevenues() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -57,6 +59,7 @@ function AccountantRevenues() {
     amount: '',
     date: new Date().toISOString().slice(0, 10),
     status: 'Pending',
+    payment_method: '',
   });
 
   useEffect(() => {
@@ -286,6 +289,7 @@ function AccountantRevenues() {
       amount: formatAmountDisplay(String(parseAmount(rev.amount))),
       date: dateStr,
       status: rev.status === 'Received' ? 'Received' : 'Pending',
+      payment_method: rev.payment_method ? String(rev.payment_method).trim() : '',
     });
     setShowEditModal(true);
   };
@@ -308,7 +312,7 @@ function AccountantRevenues() {
       return;
     }
     const amountNum = parseFloat(String(editForm.amount).replace(/,/g, ''), 10);
-    if (!editForm.description.trim() || Number.isNaN(amountNum) || amountNum <= 0) return;
+    if (!editForm.description.trim() || !editForm.payment_method || Number.isNaN(amountNum) || amountNum <= 0) return;
     setSubmitting(true);
     try {
       const res = await updateRevenue(editingRevenue.id, {
@@ -317,6 +321,7 @@ function AccountantRevenues() {
         category: editForm.category,
         amount: amountNum,
         status: editForm.status,
+        payment_method: editForm.payment_method,
       });
       if (res.success && res.revenue) {
         setRevenues((prev) => prev.map((r) => (r.id === editingRevenue.id ? res.revenue : r)));
@@ -641,9 +646,11 @@ function AccountantRevenues() {
                   required
                 >
                   <option value="">Select payment method</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="Mobile Payment">Mobile Payment</option>
+                  {REVENUE_PAYMENT_METHODS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="revenues-form-group">
@@ -731,6 +738,27 @@ function AccountantRevenues() {
                   required
                   className="revenues-form-input"
                 />
+              </div>
+              <div className="revenues-form-group">
+                <label htmlFor="edit-payment-method">Payment method</label>
+                <select
+                  id="edit-payment-method"
+                  value={editForm.payment_method}
+                  onChange={(e) => setEditForm((f) => ({ ...f, payment_method: e.target.value }))}
+                  className="revenues-form-input"
+                  required
+                >
+                  <option value="">Select payment method</option>
+                  {editForm.payment_method &&
+                    !REVENUE_PAYMENT_METHODS.includes(editForm.payment_method) && (
+                      <option value={editForm.payment_method}>{editForm.payment_method}</option>
+                    )}
+                  {REVENUE_PAYMENT_METHODS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="revenues-form-group">
                 <label htmlFor="edit-date">Date</label>

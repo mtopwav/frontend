@@ -570,7 +570,10 @@ function Payments() {
     const dateStr = formatDateInvoice(payment.created_at);
     const trnNo = '182-150-770';
     const invNum = `PAY-${payment.id}`;
-    const customerName = (payment.customer_name || '—').replace(/</g, '&lt;');
+    // Uppercase for printing while keeping HTML escaping intact.
+    const customerName = String(payment.customer_name || '—')
+      .toUpperCase()
+      .replace(/</g, '&lt;');
     const customerPhone = (payment.customer_phone || '—').replace(/</g, '&lt;');
 
     let items = [];

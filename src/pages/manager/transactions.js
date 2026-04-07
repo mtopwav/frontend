@@ -56,6 +56,22 @@ function ManagerTransactions() {
   const [showNewSpareDropdown, setShowNewSpareDropdown] = useState(false);
   const [selectedNewSpareId, setSelectedNewSpareId] = useState('');
 
+  const normalizePriceType = (value) => String(value || '').trim().toLowerCase();
+  const getSparePriceByType = (spare, priceType) => {
+    const type = normalizePriceType(priceType);
+    const retail = parseFloat(spare?.retail_price);
+    const wholesale = parseFloat(spare?.wholesale_price);
+    if (type === 'wholesale') {
+      if (Number.isFinite(wholesale)) return wholesale;
+      if (Number.isFinite(retail)) return retail;
+      return 0;
+    }
+    // Default to retail for retail/empty/unknown price types.
+    if (Number.isFinite(retail)) return retail;
+    if (Number.isFinite(wholesale)) return wholesale;
+    return 0;
+  };
+
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
     if (userData) {
@@ -293,8 +309,53 @@ function ManagerTransactions() {
       : totalAmount;
     const discountAmt = parseFloat(payment.discount_amount) || 0;
     const totalAmountFinal = Math.max(0, subTotal - discountAmt);
-    const amountReceived = Number(payment.amount_received) || 0;
-    const amountRemain = Math.max(0, totalAmountFinal - amountReceived);
+    let amountReceived = Number(payment.amount_received) || 0;
+    let amountRemain = Math.max(0, totalAmountFinal - amountReceived);
+
+    // Human-readable label for printed "Amount received by ..." row
+    const rawPaymentMethod = String(payment.payment_method || '').trim();
+    const normalizedPaymentMethod = rawPaymentMethod.toLowerCase();
+    const paymentMethodLabel = (() => {
+      if (!rawPaymentMethod) return '—';
+      if (normalizedPaymentMethod.includes('cash')) return 'Cash';
+      if (normalizedPaymentMethod.includes('bank')) return 'Bank';
+      if (normalizedPaymentMethod.includes('airtel')) return 'Airtel money';
+      if (/m\s*-?\s*pesa/.test(normalizedPaymentMethod)) return 'M -pesa';
+      if (normalizedPaymentMethod.includes('mix') || normalizedPaymentMethod.includes('yas')) return 'Mix by Yas';
+      return rawPaymentMethod;
+    })();
+
+    const cashBreakdown = Number(payment?.cash) || 0;
+    const bankBreakdown = Number(payment?.bank_transfer) || 0;
+    const airtelBreakdown = Number(payment?.airtel_money) || 0;
+    const mpesaBreakdown = Number(payment?.mpesa) || 0;
+    const yasBreakdown = Number(payment?.mix_by_yas) || 0;
+
+    const channelSegments = [
+      { label: 'cash', value: cashBreakdown },
+      { label: 'bank transfer', value: bankBreakdown },
+      { label: 'Airtel money', value: airtelBreakdown },
+      { label: 'M -pesa', value: mpesaBreakdown },
+      { label: 'Mix by Yas', value: yasBreakdown },
+    ].filter((s) => Number(s.value) > 0);
+
+    const isMultiMethodTransaction = channelSegments.length > 1;
+    const totalFromChannels = channelSegments.reduce((sum, s) => sum + Number(s.value || 0), 0);
+
+    const amountReceivedRowLabel = isMultiMethodTransaction
+      ? channelSegments
+          .map((s, idx) =>
+            idx === 0
+              ? `Amount received by ${s.label}: ${formatCurrency(s.value)}`
+              : `and amount received by ${s.label}: ${formatCurrency(s.value)}`
+          )
+          .join(' ')
+      : `Amount received by ${paymentMethodLabel}`;
+
+    if (isMultiMethodTransaction) {
+      amountReceived = totalFromChannels > 0 ? totalFromChannels : amountReceived;
+      amountRemain = Math.max(0, totalAmountFinal - amountReceived);
+    }
 
     const logoUrl = typeof logo === 'string' && logo
       ? (logo.startsWith('http') ? logo : window.location.origin + (logo.startsWith('/') ? logo : '/' + logo))
@@ -424,7 +485,7 @@ function ManagerTransactions() {
       </tr>
       ${isReceipt ? `
       <tr class="total-row">
-        <td colspan="7" class="tr" style="font-weight:600;">Amount Received</td>
+        <td colspan="7" class="tr" style="font-weight:600;">${String(amountReceivedRowLabel).replace(/</g, '&lt;')}</td>
         <td class="tr">${formatCurrency(amountReceived)}</td>
       </tr>
       <tr class="total-row">
@@ -703,10 +764,7 @@ function ManagerTransactions() {
     let itemToAdd;
 
     if (selectedSpare) {
-      const unitPrice =
-        parseFloat(selectedSpare.retail_price) ||
-        parseFloat(selectedSpare.wholesale_price) ||
-        0;
+      const unitPrice = getSparePriceByType(selectedSpare, selectedPayment?.price_type);
 
       itemToAdd = {
         sparepart_id: selectedSpare.id,
@@ -733,10 +791,10 @@ function ManagerTransactions() {
       return;
     }
 
-    // Normalize existing items (from items_json or single-line payment)
+    // Normalize existing items (prefer modal state so newly added/edited rows are included immediately)
     const existingItems =
-      selectedPayment.items && selectedPayment.items.length > 0
-        ? selectedPayment.items.map((it) => {
+      editableItems && editableItems.length > 0
+        ? editableItems.map((it) => {
             const qty = parseInt(it.quantity, 10) || 1;
             const unit = parseFloat(it.unit_price || 0);
             const total = parseFloat(it.total_amount);
@@ -794,7 +852,39 @@ function ManagerTransactions() {
         setPayments(paymentsResponse.payments);
         const updated = paymentsResponse.payments.find((p) => p.id === selectedPayment.id);
         if (updated) {
-          setSelectedPayment(updated);
+          // Keep the modal fields in sync even if backend payload omits expanded items list.
+          setSelectedPayment({
+            ...updated,
+            items: updated.items && updated.items.length > 0 ? updated.items : allItems,
+            quantity: updated.quantity ?? totalQuantity,
+            total_amount: updated.total_amount ?? totalAmount,
+          });
+          setEditableItems(
+            (updated.items && updated.items.length > 0
+              ? updated.items
+              : allItems
+            ).map((it) => {
+              const qty = parseInt(it.quantity, 10) || 1;
+              const unit = parseFloat(it.unit_price || it.price || 0);
+              const lineTotal = parseFloat(it.total_amount);
+              return {
+                sparepart_id: it.sparepart_id,
+                sparepart_name: it.sparepart_name || 'Unknown',
+                sparepart_number: it.sparepart_number || 'N/A',
+                quantity: qty,
+                unit_price: unit,
+                total_amount: Number.isFinite(lineTotal) ? lineTotal : qty * unit,
+              };
+            })
+          );
+        } else {
+          // Optimistic fallback so the added spare appears in modal immediately.
+          setSelectedPayment((prev) =>
+            prev
+              ? { ...prev, items: allItems, quantity: totalQuantity, total_amount: totalAmount }
+              : prev
+          );
+          setEditableItems(allItems);
         }
       }
 
@@ -1542,8 +1632,8 @@ function ManagerTransactions() {
                             .filter((sp) => {
                               // Exclude already selected items in this payment
                               const alreadyInPayment =
-                                selectedPayment.items &&
-                                selectedPayment.items.some(
+                                editableItems &&
+                                editableItems.some(
                                   (it) =>
                                     it.sparepart_id &&
                                     String(it.sparepart_id) === String(sp.id)
@@ -1589,7 +1679,7 @@ function ManagerTransactions() {
                                     {capitalizeName(sp.part_name)}
                                   </div>
                                   <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '2px' }}>
-                                    {sp.part_number || 'N/A'} - TZS {formatPrice(sp.retail_price ?? sp.wholesale_price ?? 0)}
+                                    {sp.part_number || 'N/A'} - TZS {formatPrice(getSparePriceByType(sp, selectedPayment?.price_type))}
                                   </div>
                                 </div>
                               </div>

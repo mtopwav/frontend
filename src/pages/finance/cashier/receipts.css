@@ -10,9 +10,16 @@
 
 .receipts-page .table-container {
   width: 100%;
+  overflow-x: auto;
 }
 
 .receipts-page .payments-table {
-  min-width: 1800px;
-  width: 100%;
+  table-layout: auto;
+  width: max-content;
+  min-width: 2500px;
+}
+
+.receipts-page .payments-table th,
+.receipts-page .payments-table td {
+  white-space: nowrap;
 }

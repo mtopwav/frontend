@@ -8,6 +8,7 @@ import {
   FaShoppingCart,
   FaBars,
   FaSignOutAlt,
+  FaChartBar,
   FaCog,
   FaUser,
   FaEnvelope,
@@ -137,9 +138,21 @@ function Messages() {
             <FaMoneyBillAlt style={{ fontSize: '1.2rem', minWidth: '20px' }} />
             <span style={{ opacity: sidebarOpen ? 1 : 0, width: sidebarOpen ? 'auto' : 0, overflow: 'hidden', transition: 'opacity 0.3s' }}>{t.finances}</span>
           </Link>
+          <Link
+            to="/admin/transactions"
+            className={'nav-item' + (window.location.pathname === '/admin/transactions' ? ' active' : '')}
+            style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '15px 20px', color: 'rgba(255, 255, 255, 0.8)', textDecoration: 'none', transition: 'all 0.3s', borderLeft: '3px solid transparent' }}
+          >
+            <FaCalendarAlt style={{ fontSize: '1.2rem', minWidth: '20px' }} />
+            <span style={{ opacity: sidebarOpen ? 1 : 0, width: sidebarOpen ? 'auto' : 0, overflow: 'hidden', transition: 'opacity 0.3s' }}>Transactions</span>
+          </Link>
           <Link to="/admin/messages" className="nav-item active" style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '15px 20px', color: 'white', textDecoration: 'none', transition: 'all 0.3s', borderLeft: '3px solid #f4a261', backgroundColor: 'rgba(255, 255, 255, 0.15)' }}>
             <FaEnvelope style={{ fontSize: '1.2rem', minWidth: '20px' }} />
             <span style={{ opacity: sidebarOpen ? 1 : 0, width: sidebarOpen ? 'auto' : 0, overflow: 'hidden', transition: 'opacity 0.3s' }}>{t.messages}</span>
+          </Link>
+          <Link to="/admin/reports" className="nav-item" style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '15px 20px', color: 'rgba(255, 255, 255, 0.8)', textDecoration: 'none', transition: 'all 0.3s', borderLeft: '3px solid transparent' }}>
+            <FaChartBar style={{ fontSize: '1.2rem', minWidth: '20px' }} />
+            <span style={{ opacity: sidebarOpen ? 1 : 0, width: sidebarOpen ? 'auto' : 0, overflow: 'hidden', transition: 'opacity 0.3s' }}>{t.reports || 'Reports'}</span>
           </Link>
           <Link to="/admin/settings" className="nav-item" style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '15px 20px', color: 'rgba(255, 255, 255, 0.8)', textDecoration: 'none', transition: 'all 0.3s', borderLeft: '3px solid transparent' }}>
             <FaCog style={{ fontSize: '1.2rem', minWidth: '20px' }} />

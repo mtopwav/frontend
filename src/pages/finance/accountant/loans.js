@@ -261,6 +261,29 @@ function AccountantLoans() {
     return Math.max(0, total - discount - received);
   };
 
+  const isMpesaPaymentMethod = (method) => {
+    const raw = String(method || '').toLowerCase().trim();
+    if (!raw) return false;
+    const compact = raw.replace(/[^a-z0-9]/g, '');
+    return compact.includes('mpesa');
+  };
+
+  const isAirtelMoneyPaymentMethod = (method) => {
+    const raw = String(method || '').toLowerCase().trim();
+    if (!raw) return false;
+    const compact = raw.replace(/[^a-z0-9]/g, '');
+    return compact.includes('airtel');
+  };
+
+  const isYasPaymentMethod = (method) => {
+    const raw = String(method || '').toLowerCase().trim();
+    if (!raw) return false;
+    const compact = raw.replace(/[^a-z0-9]/g, '');
+    return compact.includes('yas');
+  };
+
+  const isLoanPaymentType = (p) => String(p?.payment_type ?? '').trim().toLowerCase() === 'loan';
+
   // Base list: only payments where amount_remain > 0, then filter by search/status/time
   const loansWithRemain = payments.filter((p) => getAmountRemain(p) > 0);
 
@@ -307,6 +330,45 @@ function AccountantLoans() {
     const totalAfterDiscount = Math.max(0, baseTotal - discount);
     return sum + totalAfterDiscount;
   }, 0);
+
+  // Loan Paid breakdown for the selected day/range (timeFilter)
+  const loanPaidPayments = payments.filter((p) => {
+    if (!isLoanPaymentType(p)) return false;
+    if (p.status !== 'Approved') return false;
+    const received = Number(p.amount_received) || 0;
+    if (received <= 0) return false;
+    if (!isInTimeRange(p.created_at, timeFilter)) return false;
+    const total = Number(p.total_amount) || 0;
+    const discount = Number(p.discount_amount) || 0;
+    const netDue = Math.max(0, total - discount);
+    if (netDue <= 0) return false;
+    const remain = getAmountRemain(p);
+    if (Number.isNaN(remain)) return false;
+    return true; // remain === 0 (paid) or remain > 0 (debt reduced)
+  });
+
+  const loanPaidTotal = loanPaidPayments.reduce((sum, p) => sum + (Number(p.amount_received) || 0), 0);
+  const loanPaidCashTotal = loanPaidPayments.reduce(
+    (sum, p) => ((p.payment_method || '').toLowerCase() === 'cash' ? sum + (Number(p.amount_received) || 0) : sum),
+    0
+  );
+  const loanPaidBankTransferTotal = loanPaidPayments.reduce(
+    (sum, p) =>
+      ((p.payment_method || '').toLowerCase() === 'bank transfer' ? sum + (Number(p.amount_received) || 0) : sum),
+    0
+  );
+  const loanPaidAirtelMoneyTotal = loanPaidPayments.reduce(
+    (sum, p) => (isAirtelMoneyPaymentMethod(p.payment_method) ? sum + (Number(p.amount_received) || 0) : sum),
+    0
+  );
+  const loanPaidMpesaTotal = loanPaidPayments.reduce(
+    (sum, p) => (isMpesaPaymentMethod(p.payment_method) ? sum + (Number(p.amount_received) || 0) : sum),
+    0
+  );
+  const loanPaidYasTotal = loanPaidPayments.reduce(
+    (sum, p) => (isYasPaymentMethod(p.payment_method) ? sum + (Number(p.amount_received) || 0) : sum),
+    0
+  );
 
   const handleSaveEdit = async () => {
     if (!selectedPayment) return;
@@ -728,6 +790,45 @@ function AccountantLoans() {
               <div className="stat-info">
                 <h3>{t.amountRemain}</h3>
                 <p className="stat-value">TZS {formatPrice(totalAmountRemain)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="stats-row" style={{ marginTop: 18 }}>
+            <div className="stat-card">
+              <div className="stat-info">
+                <h3>Loan Paid</h3>
+                <p className="stat-value">TZS {formatPrice(loanPaidTotal)}</p>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-info">
+                <h3>Cash</h3>
+                <p className="stat-value">TZS {formatPrice(loanPaidCashTotal)}</p>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-info">
+                <h3>Bank Transfer</h3>
+                <p className="stat-value">TZS {formatPrice(loanPaidBankTransferTotal)}</p>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-info">
+                <h3>Airtel Money</h3>
+                <p className="stat-value">TZS {formatPrice(loanPaidAirtelMoneyTotal)}</p>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-info">
+                <h3>M-Pesa</h3>
+                <p className="stat-value">TZS {formatPrice(loanPaidMpesaTotal)}</p>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-info">
+                <h3>Mix by YAS</h3>
+                <p className="stat-value">TZS {formatPrice(loanPaidYasTotal)}</p>
               </div>
             </div>
           </div>

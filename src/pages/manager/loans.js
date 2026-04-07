@@ -17,17 +17,19 @@ import {
   FaClock,
   FaUsers,
   FaBox,
+  FaEdit,
   FaEye,
   FaCalendarAlt,
   FaCreditCard,
-  FaPrint
+  FaPrint,
+  FaDownload
 } from 'react-icons/fa';
 import '../sales/payments.css';
 import './loans.css';
 import logo from '../../images/logo.png';
 import ThemeToggle from '../../components/ThemeToggle';
 import LanguageSelector from '../../components/LanguageSelector';
-import { getPayments, updatePaymentStatus, updatePaymentDetails } from '../../services/api';
+import { getPayments, updatePaymentStatus, updatePaymentDetails, createLoanFromPayment } from '../../services/api';
 import { getCurrentDateTime } from '../../utils/dateTime';
 import { useTranslation } from '../../utils/useTranslation';
 
@@ -39,8 +41,12 @@ function ManagerLoans() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [oldLoansSearchTerm, setOldLoansSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('Approved');
   const [timeFilter, setTimeFilter] = useState('all');
+  const [customDateFrom, setCustomDateFrom] = useState('');
+  const [customDateTo, setCustomDateTo] = useState('');
+  const [showPaidTodayOnly, setShowPaidTodayOnly] = useState(false);
   const [payments, setPayments] = useState([]);
   const [currentDateTime, setCurrentDateTime] = useState(getCurrentDateTime());
   const [now, setNow] = useState(() => new Date());
@@ -50,6 +56,23 @@ function ManagerLoans() {
   const [editAmountReceived, setEditAmountReceived] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [logoDataUrl, setLogoDataUrl] = useState(null);
+  const [showAddLoanModal, setShowAddLoanModal] = useState(false);
+  const [addLoanPaymentId, setAddLoanPaymentId] = useState('');
+  const [addLoanCustomerIdInput, setAddLoanCustomerIdInput] = useState('');
+  const [addLoanCustomerNameInput, setAddLoanCustomerNameInput] = useState('');
+  const [addLoanCustomerPhoneInput, setAddLoanCustomerPhoneInput] = useState('');
+  const [addLoanSparepartsInput, setAddLoanSparepartsInput] = useState('');
+  const [addLoanTotalAmountInput, setAddLoanTotalAmountInput] = useState('');
+  const [addLoanCashInput, setAddLoanCashInput] = useState('');
+  const [addLoanBankTransferInput, setAddLoanBankTransferInput] = useState('');
+  const [addLoanAirtelMoneyInput, setAddLoanAirtelMoneyInput] = useState('');
+  const [addLoanMpesaInput, setAddLoanMpesaInput] = useState('');
+  const [addLoanMixByYasInput, setAddLoanMixByYasInput] = useState('');
+  const [addLoanDiscountInput, setAddLoanDiscountInput] = useState('');
+  const [addLoanAmountReceivedInput, setAddLoanAmountReceivedInput] = useState('');
+  const [addLoanAmountRemainInput, setAddLoanAmountRemainInput] = useState('');
+  const [addLoanStatus, setAddLoanStatus] = useState('Pending');
+  const [addLoanSaving, setAddLoanSaving] = useState(false);
 
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -166,35 +189,56 @@ function ManagerLoans() {
     return Number.isNaN(n) ? 0 : n;
   };
 
-  // Time filter: all = all transactions; today = only today; week = last 7 days; month = last 30 days
-  const isInTimeRange = (dateString, range) => {
-    if (!dateString || range === 'all') return true; // All time → display all transactions
+  // Time filter: all | today | week | month | custom (from/to calendar dates)
+  const isInTimeRange = (dateString, range, dateFromStr = '', dateToStr = '') => {
+    if (!dateString || range === 'all') return true;
     const d = new Date(dateString);
     if (isNaN(d.getTime())) return false;
+    const txTime = d.getTime();
+
+    if (range === 'custom') {
+      const from = String(dateFromStr || '').trim();
+      const to = String(dateToStr || '').trim();
+      if (!from || !to) return true;
+      const d0 = new Date(from);
+      const d1 = new Date(to);
+      if (isNaN(d0.getTime()) || isNaN(d1.getTime())) return true;
+      const start = new Date(Math.min(d0.getTime(), d1.getTime()));
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(Math.max(d0.getTime(), d1.getTime()));
+      end.setHours(23, 59, 59, 999);
+      return txTime >= start.getTime() && txTime <= end.getTime();
+    }
+
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date(now);
     todayEnd.setHours(23, 59, 59, 999);
-    const txDateOnly = new Date(d);
-    txDateOnly.setHours(0, 0, 0, 0);
     const todayStartTime = todayStart.getTime();
     const todayEndTime = todayEnd.getTime();
-    const txTime = d.getTime();
     if (range === 'today') {
-      // Today → display only today's transactions (same calendar day)
       return txTime >= todayStartTime && txTime <= todayEndTime;
     }
     if (range === 'week') {
-      // Last 7 days → transactions done within the past 7 days
       const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
       return txTime >= sevenDaysAgo && txTime <= now.getTime();
     }
     if (range === 'month') {
-      // Last 30 days → transactions done within the past 30 days
       const thirtyDaysAgo = now.getTime() - 30 * 24 * 60 * 60 * 1000;
       return txTime >= thirtyDaysAgo && txTime <= now.getTime();
     }
     return true;
+  };
+
+  const getDateRangeLabel = () => {
+    if (timeFilter === 'custom') {
+      if (customDateFrom && customDateTo) return `${customDateFrom} – ${customDateTo}`;
+      return 'Custom range';
+    }
+    if (timeFilter === 'today') return 'Today';
+    if (timeFilter === 'week') return 'Last 7 days';
+    if (timeFilter === 'month') return 'Last 30 days';
+    return 'All time';
   };
 
   const formatDateTime = (dateString) => {
@@ -250,14 +294,7 @@ function ManagerLoans() {
         : window.location.origin + '/logo192.png';
     const logoSrcForPrint = logoDataUrl || logoUrl;
 
-    const dateRangeLabel =
-      timeFilter === 'today'
-        ? 'Today'
-        : timeFilter === 'week'
-        ? 'Last 7 days'
-        : timeFilter === 'month'
-        ? 'Last 30 days'
-        : 'All time';
+    const dateRangeLabel = getDateRangeLabel();
 
     const getLoanItems = (p) => {
       if (p.items && p.items.length > 0) {
@@ -290,7 +327,6 @@ function ManagerLoans() {
               </tr>
             </thead>`;
 
-    let serial = 0;
     const loansSectionsHtml =
       sortedFilteredLoans.length === 0
         ? '<table class="tax-inv-table">' + tableHeader + '<tbody><tr><td colspan="8" style="text-align:center;padding:12px;">No loans found</td></tr></tbody></table>'
@@ -306,13 +342,8 @@ function ManagerLoans() {
               const items = getLoanItems(p);
               const dateStr = formatDateTime(p.created_at);
 
-              let sumTotalAmount = 0;
-              let sumAmountReceived = 0;
-              let sumAmountRemain = 0;
-
               const rows = items
-                .map((item) => {
-                  serial += 1;
+                .map((item, idx) => {
                   const sparePartName = `${item.name} (${item.partNo})`;
                   const lineTotal = item.quantity * item.unitPrice;
                   const amountReceivedForLine =
@@ -320,12 +351,9 @@ function ManagerLoans() {
                       ? (lineTotal / totalAfterDiscount) * received
                       : 0;
                   const amountRemainForLine = Math.max(0, lineTotal - amountReceivedForLine);
-                  sumTotalAmount += lineTotal;
-                  sumAmountReceived += amountReceivedForLine;
-                  sumAmountRemain += amountRemainForLine;
                   return `
                 <tr>
-                  <td class="tc">${serial}</td>
+                  <td class="tc">${idx + 1}</td>
                   <td class="tl">${dateStr}</td>
                   <td class="tl">${sparePartName}</td>
                   <td class="tc">${item.quantity}</td>
@@ -340,15 +368,16 @@ function ManagerLoans() {
               const totalRow = `
                 <tr class="total-row total-final">
                   <td colspan="5" class="tr">Total</td>
-                  <td class="tr">${formatPrice(sumTotalAmount)}</td>
-                  <td class="tr">${formatPrice(sumAmountReceived)}</td>
-                  <td class="tr">${formatPrice(sumAmountRemain)}</td>
+                  <td class="tr">${formatPrice(totalAfterDiscount)}</td>
+                  <td class="tr">${formatPrice(received)}</td>
+                  <td class="tr">${formatPrice(amountRemain)}</td>
                 </tr>`;
 
               return `
           <div class="tax-inv-customer">
             <strong>Customer Name:</strong> ${customerName}<br />
-            <strong>Phone:</strong> ${customerPhone}
+            <strong>Phone:</strong> ${customerPhone}<br />
+            <strong>Discount (TZS):</strong> ${formatPrice(discount)}
           </div>
           <table class="tax-inv-table">
             ${tableHeader}
@@ -359,6 +388,8 @@ function ManagerLoans() {
           </table>`;
             })
             .join('');
+
+    const totalDiscountAmount = sortedFilteredLoans.reduce((sum, p) => sum + (Number(p.discount_amount) || 0), 0);
 
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -496,6 +527,7 @@ function ManagerLoans() {
 
           <div class="tax-inv-footer">
             <div class="tax-inv-footer-row"><label>Total loan amount (TZS):</label> ${formatPrice(totalLoanAmount)}</div>
+            <div class="tax-inv-footer-row"><label>Total discount (TZS):</label> ${formatPrice(totalDiscountAmount)}</div>
             <div class="tax-inv-footer-row"><label>Total amount remain (TZS):</label> ${formatPrice(totalAmountRemain)}</div>
           </div>
 
@@ -503,6 +535,274 @@ function ManagerLoans() {
         </body>
       </html>
     `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  const handlePrintOldLoans = () => {
+    const printWindow = window.open('', '_blank', 'width=1000,height=700');
+    if (!printWindow) return;
+
+    const logoPath = typeof logo === 'string' ? logo : (logo && logo.default) ? logo.default : '';
+    const logoUrl =
+      logoPath
+        ? logoPath.startsWith('http')
+          ? logoPath
+          : window.location.origin + (logoPath.startsWith('/') ? logoPath : '/' + logoPath)
+        : window.location.origin + '/logo192.png';
+    const logoSrcForPrint = logoDataUrl || logoUrl;
+
+    const dateRangeLabel = getDateRangeLabel();
+
+    const getLoanItems = (p) => {
+      if (p.items && p.items.length > 0) {
+        return p.items.map((item) => ({
+          name: (item.sparepart_name || 'Unknown').replace(/</g, '&lt;'),
+          partNo: (item.sparepart_number || 'N/A').toUpperCase(),
+          quantity: parseInt(item.quantity, 10) || 0,
+          unitPrice: parseFloat(item.unit_price || item.price) || 0
+        }));
+      }
+      return [{
+        name: (p.sparepart_name || '—').replace(/</g, '&lt;'),
+        partNo: (p.sparepart_number || 'N/A').toUpperCase(),
+        quantity: parseInt(p.quantity, 10) || 0,
+        unitPrice: parseFloat(p.unit_price || p.price) || 0
+      }];
+    };
+
+    const tableHeader = `
+            <thead>
+              <tr>
+                <th class="tc">S.No</th>
+                <th class="tl">Date</th>
+                <th class="tl">Spare part</th>
+                <th class="tc">Qty</th>
+                <th class="tr">Unit price (TZS)</th>
+                <th class="tr">Total amount (TZS)</th>
+                <th class="tr">Amount received (TZS)</th>
+                <th class="tr">Amount remain (TZS)</th>
+              </tr>
+            </thead>`;
+
+    const loansSectionsHtml =
+      sortedFilteredOldLoans.length === 0
+        ? '<table class="tax-inv-table">' + tableHeader + '<tbody><tr><td colspan="8" style="text-align:center;padding:12px;">No old loans found</td></tr></tbody></table>'
+        : sortedFilteredOldLoans
+            .map((p) => {
+              const baseTotal = Number(p.total_amount) || 0;
+              const discount = Number(p.discount_amount) || 0;
+              const totalAfterDiscount = Math.max(0, baseTotal - discount);
+              const received = Number(p.amount_received) || 0;
+              const amountRemain = Math.max(0, totalAfterDiscount - received);
+              const customerName = (p.customer_name || '').toUpperCase();
+              const customerPhone = p.customer_phone || '—';
+              const items = getLoanItems(p);
+              const dateStr = formatDateTime(p.created_at);
+
+              const rows = items
+                .map((item, idx) => {
+                  const sparePartName = `${item.name} (${item.partNo})`;
+                  const lineTotal = item.quantity * item.unitPrice;
+                  const amountReceivedForLine =
+                    totalAfterDiscount > 0
+                      ? (lineTotal / totalAfterDiscount) * received
+                      : 0;
+                  const amountRemainForLine = Math.max(0, lineTotal - amountReceivedForLine);
+                  return `
+                <tr>
+                  <td class="tc">${idx + 1}</td>
+                  <td class="tl">${dateStr}</td>
+                  <td class="tl">${sparePartName}</td>
+                  <td class="tc">${item.quantity}</td>
+                  <td class="tr">${formatPrice(item.unitPrice)}</td>
+                  <td class="tr">${formatPrice(lineTotal)}</td>
+                  <td class="tr">${formatPrice(amountReceivedForLine)}</td>
+                  <td class="tr">${formatPrice(amountRemainForLine)}</td>
+                </tr>`;
+                })
+                .join('');
+
+              const totalRow = `
+                <tr class="total-row total-final">
+                  <td colspan="5" class="tr">Total</td>
+                  <td class="tr">${formatPrice(totalAfterDiscount)}</td>
+                  <td class="tr">${formatPrice(received)}</td>
+                  <td class="tr">${formatPrice(amountRemain)}</td>
+                </tr>`;
+
+              return `
+          <div class="tax-inv-customer">
+            <strong>Customer Name:</strong> ${customerName}<br />
+            <strong>Phone:</strong> ${customerPhone}<br />
+            <strong>Discount (TZS):</strong> ${formatPrice(discount)}
+          </div>
+          <table class="tax-inv-table">
+            ${tableHeader}
+            <tbody>
+              ${rows}
+              ${totalRow}
+            </tbody>
+          </table>`;
+            })
+            .join('');
+
+    const totalDiscountAmount = sortedFilteredOldLoans.reduce((sum, p) => sum + (Number(p.discount_amount) || 0), 0);
+
+    const oldLoansTotalAmount = sortedFilteredOldLoans.reduce(
+      (sum, p) => sum + Math.max(0, (Number(p.total_amount) || 0) - (Number(p.discount_amount) || 0)),
+      0
+    );
+    const oldLoansTotalRemain = sortedFilteredOldLoans.reduce((sum, p) => sum + Math.max(0, getAmountRemain(p)), 0);
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Old Loans Report - Mamuya Auto Spare Parts</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+              max-width: 900px;
+              margin: 0 auto;
+              padding: 24px;
+              color: #222;
+              font-size: 11px;
+              line-height: 1.4;
+            }
+            .tax-inv-top {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 24px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid #333;
+            }
+            .tax-inv-left {
+              display: flex;
+              align-items: flex-start;
+              gap: 20px;
+              flex: 1;
+            }
+            .tax-inv-logo {
+              max-height: 60px;
+              max-width: 140px;
+              object-fit: contain;
+            }
+            .tax-inv-company { flex: 1; }
+            .tax-inv-company h2 {
+              margin: 0 0 10px 0;
+              font-size: 1.15rem;
+              font-weight: 700;
+              color: #111;
+              letter-spacing: 0.02em;
+            }
+            .tax-inv-address { margin: 0; color: #444; font-size: 10px; line-height: 1.5; }
+            .tax-inv-meta { text-align: right; min-width: 180px; }
+            .tax-inv-meta p { margin: 0 0 6px 0; font-size: 11px; }
+            .tax-inv-title {
+              text-align: center;
+              font-size: 1.6rem;
+              font-weight: 700;
+              margin: 24px 0;
+              letter-spacing: 0.05em;
+            }
+            .tax-inv-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 0 0 20px 0;
+              font-size: 10px;
+              border: 1px solid #333;
+            }
+            .tax-inv-table th,
+            .tax-inv-table td {
+              border: 1px solid #333;
+              padding: 6px 8px;
+              vertical-align: middle;
+            }
+            .tax-inv-table th {
+              background: #f0f0f0;
+              font-weight: 700;
+              text-align: center;
+              font-size: 10px;
+            }
+            .tax-inv-table th.tl { text-align: left; }
+            .tax-inv-table .tc { text-align: center; }
+            .tax-inv-table .tr { text-align: right; }
+            .tax-inv-table .tl { text-align: left; }
+            .tax-inv-table tbody tr { background: #fff; }
+            .tax-inv-table .total-row td { font-weight: 600; background: #f0f0f0; }
+            .tax-inv-table .total-row.total-first td { border-top: 2px solid #333; }
+            .tax-inv-table .total-final td { font-weight: 700; font-size: 11px; background: #e8e8e8; }
+            .tax-inv-customer {
+              margin-top: 24px;
+              margin-bottom: 12px;
+              padding: 8px 0;
+            }
+            .tax-inv-customer:first-of-type {
+              margin-top: 0;
+            }
+            .tax-inv-customer strong {
+              display: inline-block;
+              min-width: 130px;
+              font-size: 11px;
+            }
+            .tax-inv-footer {
+              margin-top: 28px;
+              font-size: 11px;
+              border-top: 1px solid #ccc;
+              padding-top: 16px;
+            }
+            .tax-inv-footer-row { margin-bottom: 12px; }
+            .tax-inv-footer-row label { display: inline-block; min-width: 200px; font-weight: 600; }
+            .tax-inv-disclaimer {
+              margin-top: 28px;
+              font-style: italic;
+              color: #666;
+              font-size: 10px;
+            }
+            @media print { body { padding: 16px; } .tax-inv-logo { max-height: 52px; } }
+          </style>
+        </head>
+        <body>
+          <div class="tax-inv-top">
+            <div class="tax-inv-left">
+              <img src="${String(logoSrcForPrint).replace(/"/g, '&quot;')}" alt="Logo" class="tax-inv-logo" />
+              <div class="tax-inv-company">
+                <h2>Mamuya Auto Spare Parts</h2>
+                <p class="tax-inv-address">
+                  Kilimanjaro, Tanzania<br />
+                  Phone: +255 22 123 4567
+                </p>
+              </div>
+            </div>
+            <div class="tax-inv-meta">
+              <p><strong>Report:</strong> Old Loans</p>
+              <p><strong>Period:</strong> ${dateRangeLabel}</p>
+              <p><strong>Printed:</strong> ${new Date().toLocaleString('en-GB')}</p>
+            </div>
+          </div>
+
+          <h1 class="tax-inv-title">OLD LOANS REPORT</h1>
+
+          ${loansSectionsHtml}
+
+          <div class="tax-inv-footer">
+            <div class="tax-inv-footer-row"><label>Total old loans amount (TZS):</label> ${formatPrice(oldLoansTotalAmount)}</div>
+            <div class="tax-inv-footer-row"><label>Total discount (TZS):</label> ${formatPrice(totalDiscountAmount)}</div>
+            <div class="tax-inv-footer-row"><label>Total old loans remain (TZS):</label> ${formatPrice(oldLoansTotalRemain)}</div>
+          </div>
+
+          <p class="tax-inv-disclaimer">*This is a computer generated old loans report, hence no signature is required.*</p>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(printContent);
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
@@ -526,7 +826,7 @@ function ManagerLoans() {
     return `${day}/${month}/${year}`;
   };
 
-  const handlePrintLoanDetails = (payment) => {
+  const getLoanDetailsHtml = (payment) => {
     const dbRemain = payment.amount_remain != null ? Number(payment.amount_remain) : null;
     const baseTotal = Number(payment.total_amount) || 0;
     const discount = Number(payment.discount_amount) || 0;
@@ -797,6 +1097,12 @@ function ManagerLoans() {
         </body>
       </html>
     `;
+    return printContent;
+  };
+
+  const handlePrintLoanDetails = (payment) => {
+    const html = getLoanDetailsHtml(payment);
+    if (!html) return;
 
     const printWindow = window.open('', '_blank', 'width=800,height=600');
     if (!printWindow) {
@@ -810,7 +1116,7 @@ function ManagerLoans() {
     }
 
     printWindow.document.open();
-    printWindow.document.write(printContent);
+    printWindow.document.write(html);
     printWindow.document.close();
 
     const triggerPrint = () => {
@@ -825,24 +1131,134 @@ function ManagerLoans() {
     }
   };
 
+  const handleDownloadLoanDetails = (payment) => {
+    const html = getLoanDetailsHtml(payment);
+    if (!html) return;
+
+    try {
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `loan-details-${payment.id}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Failed to download document. Please try again.',
+        confirmButtonColor: '#1a3a5f'
+      });
+    }
+  };
+
   const handleEdit = (payment) => {
     setSelectedPayment(payment);
-    const received = payment.amount_received;
-    setEditAmountReceived(received != null ? String(received).replace(/[^\d.]/g, '') : '');
+    // For Old Loans editing, the input represents the *additional* amount to add.
+    // We show the previous amount in a separate read-only field.
+    setEditAmountReceived('');
     setShowEditModal(true);
+  };
+
+  const handleAddLoan = async () => {
+    if (!addLoanPaymentId) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Payment required',
+        text: 'Please select a payment to create the loan record.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
+
+    const paymentIdNum = parseInt(addLoanPaymentId, 10);
+    if (!Number.isFinite(paymentIdNum)) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Invalid payment id',
+        text: 'Payment ID must be a number.',
+        confirmButtonColor: '#1a3a5f',
+      });
+      return;
+    }
+
+    setAddLoanSaving(true);
+    try {
+      const normalizeNumInput = (v) => String(v ?? '').replace(/,/g, '').trim();
+      const overrides = {
+        customer_id: addLoanCustomerIdInput,
+        customer_name: addLoanCustomerNameInput,
+        customer_phone: addLoanCustomerPhoneInput,
+        spareparts: addLoanSparepartsInput,
+        total_amount: normalizeNumInput(addLoanTotalAmountInput),
+        cash: normalizeNumInput(addLoanCashInput),
+        bank_transfer: normalizeNumInput(addLoanBankTransferInput),
+        airtel_money: normalizeNumInput(addLoanAirtelMoneyInput),
+        mpesa: normalizeNumInput(addLoanMpesaInput),
+        mix_by_yas: normalizeNumInput(addLoanMixByYasInput),
+        discount: normalizeNumInput(addLoanDiscountInput),
+        amount_received: normalizeNumInput(addLoanAmountReceivedInput),
+        amount_remain: normalizeNumInput(addLoanAmountRemainInput),
+      };
+
+      const response = await createLoanFromPayment(paymentIdNum, addLoanStatus, overrides);
+      if (!response.success) throw new Error(response.message || 'Failed to create loan');
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Loan created',
+        text: 'Loan record inserted successfully.',
+        confirmButtonColor: '#1a3a5f',
+      });
+
+      setShowAddLoanModal(false);
+      setAddLoanPaymentId('');
+      setAddLoanCustomerIdInput('');
+      setAddLoanCustomerNameInput('');
+      setAddLoanCustomerPhoneInput('');
+      setAddLoanSparepartsInput('');
+      setAddLoanTotalAmountInput('');
+      setAddLoanCashInput('');
+      setAddLoanBankTransferInput('');
+      setAddLoanAirtelMoneyInput('');
+      setAddLoanMpesaInput('');
+      setAddLoanMixByYasInput('');
+      setAddLoanDiscountInput('');
+      setAddLoanAmountReceivedInput('');
+      setAddLoanAmountRemainInput('');
+      setAddLoanStatus('Pending');
+
+      // Refresh payments list (UI still uses payments as source-of-truth).
+      const refreshed = await getPayments();
+      if (refreshed.success && refreshed.payments) setPayments(refreshed.payments);
+    } catch (error) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: error.message || 'Failed to create loan.',
+        confirmButtonColor: '#1a3a5f',
+      });
+    } finally {
+      setAddLoanSaving(false);
+    }
   };
 
   const handleSaveEdit = async () => {
     if (!selectedPayment) return;
-    const received = parseCommaNumber(editAmountReceived);
+    const previousReceived = Number(selectedPayment.amount_received) || 0;
+    const deltaReceived = parseCommaNumber(editAmountReceived);
     const total = Number(selectedPayment.total_amount) || 0;
     const discount = Number(selectedPayment.discount_amount) || 0;
     const totalAfterDiscount = Math.max(0, total - discount);
-    const amountRemain = Math.max(0, totalAfterDiscount - received);
+    const newReceivedTotal = previousReceived + deltaReceived;
+    const amountRemain = Math.max(0, totalAfterDiscount - newReceivedTotal);
     setEditSaving(true);
     try {
       const response = await updatePaymentDetails(selectedPayment.id, {
-        amount_received: received,
+        amount_received: newReceivedTotal,
         amount_remain: amountRemain
       });
       if (!response.success) throw new Error(response.message || 'Failed to update');
@@ -856,7 +1272,7 @@ function ManagerLoans() {
         setPayments((prev) =>
           prev.map((p) =>
             p.id === selectedPayment.id
-              ? { ...p, amount_received: received, amount_remain: amountRemain }
+              ? { ...p, amount_received: newReceivedTotal, amount_remain: amountRemain }
               : p
           )
         );
@@ -959,8 +1375,37 @@ function ManagerLoans() {
     return Math.max(0, total - discount - received);
   };
 
-  // Base list: only payments where amount_remain > 0, then filter by search/status/time
-  const loansWithRemain = payments.filter((p) => getAmountRemain(p) > 0);
+  const isDateOnSameCalendarDay = (dateString, refNow) => {
+    if (!dateString) return false;
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return false;
+    const ref = refNow instanceof Date ? refNow : new Date(refNow);
+    return (
+      d.getFullYear() === ref.getFullYear() &&
+      d.getMonth() === ref.getMonth() &&
+      d.getDate() === ref.getDate()
+    );
+  };
+
+  /** Fully settled loan with last activity (payment/update) on today's calendar date. */
+  const isLoanPaidToday = (p) => {
+    if (getAmountRemain(p) > 0) return false;
+    const activityAt = p.updated_at || p.approved_at || p.confirmed_at || p.created_at;
+    return isDateOnSameCalendarDay(activityAt, now);
+  };
+
+  const isLoanPaymentType = (p) => String(p?.payment_type ?? '').trim().toLowerCase() === 'loan';
+
+  // Base list:
+  // - New Loans: payment_type = loan
+  // - Old Loans: amount_remain > 0 and payment_type is empty/null (no payment type)
+  const loansWithRemain = payments.filter((p) => isLoanPaymentType(p));
+  const oldLoansBase = payments.filter((p) => {
+    const hasNoPaymentType = !String(p?.payment_type ?? '').trim();
+    return hasNoPaymentType && getAmountRemain(p) > 0;
+  });
+  // For the Add Loan modal: allow inserting from ANY loan-type payment (no remain limitation).
+  const loansForAdd = payments.filter((p) => isLoanPaymentType(p));
 
   const filteredLoans = loansWithRemain.filter((payment) => {
     const term = searchTerm.toLowerCase();
@@ -976,9 +1421,29 @@ function ManagerLoans() {
       (statusFilter === 'Approved' && payment.status === 'Approved') ||
       (statusFilter === 'Rejected' && payment.status === 'Rejected');
 
-    const matchesTime = isInTimeRange(payment.created_at, timeFilter);
+    const matchesTime = isInTimeRange(payment.created_at, timeFilter, customDateFrom, customDateTo);
+
+    if (showPaidTodayOnly && !isLoanPaidToday(payment)) return false;
 
     return matchesSearch && matchesStatus && matchesTime;
+  });
+
+  // Old Loans base rule:
+  // amount_remain > 0 and no payment_type.
+  // Search in Old Loans section is applied on top of this base rule.
+  const filteredOldLoans = oldLoansBase.filter((payment) => {
+    if (showPaidTodayOnly) return false;
+    if (payment.status !== 'Approved') return false;
+    const matchesTime = isInTimeRange(payment.created_at, timeFilter, customDateFrom, customDateTo);
+    if (!matchesTime) return false;
+    const term = String(oldLoansSearchTerm || '').toLowerCase().trim();
+    if (!term) return true;
+    return (
+      (payment.customer_name && payment.customer_name.toLowerCase().includes(term)) ||
+      (payment.customer_phone && payment.customer_phone.includes(oldLoansSearchTerm)) ||
+      (payment.sparepart_name && payment.sparepart_name.toLowerCase().includes(term)) ||
+      (payment.sparepart_number && payment.sparepart_number.toLowerCase().includes(term))
+    );
   });
 
   // Sort by date and time (newest first)
@@ -988,22 +1453,88 @@ function ManagerLoans() {
     return dateB - dateA;
   });
 
+  const sortedFilteredOldLoans = [...filteredOldLoans].sort((a, b) => {
+    const dateA = new Date(a.created_at || 0).getTime();
+    const dateB = new Date(b.created_at || 0).getTime();
+    return dateB - dateA;
+  });
+
   const pendingLoansCount = loansWithRemain.filter((p) => p.status === 'Pending').length;
   const approvedLoansCount = loansWithRemain.filter((p) => p.status === 'Approved').length;
   const rejectedLoansCount = loansWithRemain.filter((p) => p.status === 'Rejected').length;
 
-  const totalAmountRemain = filteredLoans.reduce((sum, p) => {
-    // Use database value, subtract discount for display
-    const amountRemain = p.amount_remain != null ? Number(p.amount_remain) : null;
-    const discount = p.discount_amount != null ? Number(p.discount_amount) : 0;
-    
-    if (amountRemain != null && !Number.isNaN(amountRemain)) {
-      // Subtract discount from amount_remain for display
-      const displayRemain = discount > 0 ? Math.max(0, amountRemain - discount) : amountRemain;
-      return sum + displayRemain;
+  const oldLoansCount = oldLoansBase.length;
+
+  // For Add Loan modal: show customer name for selected Payment ID.
+  const selectedAddLoanPayment = loansForAdd.find((p) => String(p.id) === String(addLoanPaymentId));
+
+  const deriveSparepartsStrFromPayment = (p) => {
+    if (!p) return '';
+    try {
+      if (Array.isArray(p.items) && p.items.length > 0) {
+        const ids = p.items.map((it) => it?.sparepart_id).filter(Boolean);
+        if (ids.length > 0) return ids.map((x) => String(x)).join(',').slice(0, 100);
+      }
+      if (p.sparepart_id != null) return String(p.sparepart_id).slice(0, 100);
+    } catch {
+      // ignore
     }
-    // Fallback calculation if database value is not available
+    return '';
+  };
+
+  useEffect(() => {
+    if (!showAddLoanModal) return;
+
+    if (!selectedAddLoanPayment) {
+      setAddLoanCustomerIdInput('');
+      setAddLoanCustomerNameInput('');
+      setAddLoanCustomerPhoneInput('');
+      setAddLoanSparepartsInput('');
+      setAddLoanTotalAmountInput('');
+      setAddLoanCashInput('');
+      setAddLoanBankTransferInput('');
+      setAddLoanAirtelMoneyInput('');
+      setAddLoanMpesaInput('');
+      setAddLoanMixByYasInput('');
+      setAddLoanDiscountInput('');
+      setAddLoanAmountReceivedInput('');
+      setAddLoanAmountRemainInput('');
+      return;
+    }
+
+    const p = selectedAddLoanPayment;
+    setAddLoanCustomerIdInput(p.customer_id != null ? String(p.customer_id) : '');
+    setAddLoanCustomerNameInput(p.customer_name != null ? String(p.customer_name) : '');
+    setAddLoanCustomerPhoneInput(p.customer_phone != null ? String(p.customer_phone) : '');
+    setAddLoanSparepartsInput(deriveSparepartsStrFromPayment(p));
+    setAddLoanTotalAmountInput(p.total_amount != null ? String(p.total_amount) : '');
+    setAddLoanCashInput(p.cash != null ? String(p.cash) : '');
+    setAddLoanBankTransferInput(p.bank_transfer != null ? String(p.bank_transfer) : '');
+    setAddLoanAirtelMoneyInput(p.airtel_money != null ? String(p.airtel_money) : '');
+    setAddLoanMpesaInput(p.mpesa != null ? String(p.mpesa) : '');
+    setAddLoanMixByYasInput(p.mix_by_yas != null ? String(p.mix_by_yas) : '');
+    setAddLoanDiscountInput(p.discount_amount != null ? String(p.discount_amount) : '');
+    setAddLoanAmountReceivedInput(p.amount_received != null ? String(p.amount_received) : '');
+
+    const remainVal = getAmountRemain(p);
+    setAddLoanAmountRemainInput(remainVal != null ? String(remainVal) : '');
+  }, [
+    showAddLoanModal,
+    selectedAddLoanPayment,
+    addLoanPaymentId,
+    // getAmountRemain is stable within render scope
+  ]);
+
+  const totalAmountRemain = filteredLoans.reduce((sum, p) => {
+    const amountRemain = p.amount_remain != null ? Number(p.amount_remain) : null;
+    if (amountRemain != null && !Number.isNaN(amountRemain)) {
+      // `amount_remain` is already the net remain (after discount) in DB.
+      return sum + Math.max(0, amountRemain);
+    }
+
+    // Fallback: compute net remain from fields.
     const total = Number(p.total_amount) || 0;
+    const discount = p.discount_amount != null ? Number(p.discount_amount) : 0;
     const totalAfterDiscount = Math.max(0, total - discount);
     const received = Number(p.amount_received) || 0;
     return sum + Math.max(0, totalAfterDiscount - received);
@@ -1105,7 +1636,7 @@ function ManagerLoans() {
 
         <div className="payments-content">
           <section className="manager-welcome-section">
-            <h2 className="manager-loans-intro">{t.loansOutstanding}</h2>
+            <h2 className="manager-loans-intro">{t.newLoans || 'New Loans'}</h2>
           </section>
 
           <div className="action-bar">
@@ -1127,14 +1658,46 @@ function ManagerLoans() {
                 <option value="Rejected">Rejected</option>
               </select>
             </div>
-            <div className="filter-box">
+            <div className="filter-box manager-time-filter-group">
               <select value={timeFilter} onChange={(e) => setTimeFilter(e.target.value)} className="status-filter">
                 <option value="all">{t.allTime}</option>
                 <option value="today">{t.today}</option>
                 <option value="week">{t.last7Days}</option>
                 <option value="month">{t.last30Days}</option>
+                <option value="custom">{t.customRange}</option>
               </select>
+              {timeFilter === 'custom' && (
+                <div className="manager-date-range-inputs" aria-label="Date range">
+                  <label className="manager-date-range-label">
+                    <span>{t.fromDate}</span>
+                    <input
+                      type="date"
+                      value={customDateFrom}
+                      onChange={(e) => setCustomDateFrom(e.target.value)}
+                      className="manager-date-input"
+                    />
+                  </label>
+                  <label className="manager-date-range-label">
+                    <span>{t.toDate}</span>
+                    <input
+                      type="date"
+                      value={customDateTo}
+                      onChange={(e) => setCustomDateTo(e.target.value)}
+                      className="manager-date-input"
+                    />
+                  </label>
+                </div>
+              )}
             </div>
+            <button
+              type="button"
+              className={`manager-paid-today-btn${showPaidTodayOnly ? ' active' : ''}`}
+              onClick={() => setShowPaidTodayOnly((v) => !v)}
+              title={t.loansPaidTodayHint}
+            >
+              <FaCheckCircle aria-hidden />
+              <span>{t.loansPaidToday}</span>
+            </button>
           </div>
 
           <div className="stats-row manager-stats-row">
@@ -1160,9 +1723,9 @@ function ManagerLoans() {
 
           <section className="manager-transactions-table-section">
             <div className="manager-section-title-row">
-              <h3 className="manager-section-title">{t.approvedLoansByManager}</h3>
+              <h3 className="manager-section-title">{t.newLoans || 'New Loans'}</h3>
               <span className="manager-filter-summary">
-                {searchTerm || statusFilter !== 'All' || timeFilter !== 'all'
+                {searchTerm || statusFilter !== 'All' || timeFilter !== 'all' || showPaidTodayOnly
                   ? t.showingXOfYLoans.replace('{x}', filteredLoans.length).replace('{y}', loansWithRemain.length)
                   : t.showingXLoans.replace('{x}', filteredLoans.length)}
                 {sortedFilteredLoans.length > 0 && t.sortedByDateNewest}
@@ -1178,11 +1741,12 @@ function ManagerLoans() {
               </button>
             </div>
             <div className="table-container">
-              <table className="payments-table">
+              <table className="items-table">
                 <thead>
                   <tr>
                     <th>{t.actions}</th>
                     <th>{t.customer}</th>
+                    <th>{t.amountReceived || 'Amount Received'}</th>
                     <th>{t.amountRemain}</th>
                     <th>{t.discount || 'Discount'}</th>
                     <th>{t.paymentMethod}</th>
@@ -1193,8 +1757,8 @@ function ManagerLoans() {
                 <tbody>
                   {sortedFilteredLoans.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="no-data">
-                        {t.noApprovedLoans}
+                      <td colSpan="8" className="no-data">
+                        {t.noNewLoans || 'No new loans found'}
                       </td>
                     </tr>
                   ) : (
@@ -1233,6 +1797,10 @@ function ManagerLoans() {
                                 <FaPrint className="action-icon" />
                                 <span className="action-text">Print Details</span>
                               </button>
+                              <button className="action-btn download" title="Download Details" onClick={() => handleDownloadLoanDetails(payment)}>
+                                <FaDownload className="action-icon" />
+                                <span className="action-text">Download</span>
+                              </button>
                               {needsApproval && (
                                 <>
                                   <button
@@ -1265,13 +1833,20 @@ function ManagerLoans() {
                             </div>
                           </td>
                           <td className="amount-cell">
+                            {receivedFromDB != null
+                              ? `TZS ${formatPrice(receivedFromDB)}`
+                              : '—'}
+                          </td>
+                          <td className="amount-cell">
                             {displayAmountRemain != null
                               ? `TZS ${formatPrice(displayAmountRemain)}`
                               : '—'}
                           </td>
                           <td className="amount-cell">
                             {discountFromDB != null
-                              ? `TZS ${formatPrice(discountFromDB)}`
+                              ? Number(discountFromDB) > 0
+                                ? `TZS ${formatPrice(discountFromDB)}`
+                                : '—'
                               : '—'}
                           </td>
                           <td>
@@ -1301,17 +1876,439 @@ function ManagerLoans() {
                 </tbody>
               </table>
             </div>
-            <div className="manager-loans-total-card">
-              <span className="manager-loans-total-label">{t.totalLoanAmount || 'Total Loan Amount'}</span>
-              <span className="manager-loans-total-value">TZS {formatPrice(totalLoanAmount)}</span>
+            <div className="stats-row manager-loans-summary-row">
+              <div className="stat-card">
+                <div className="stat-info">
+                  <h3>{t.totalLoanAmount || 'Total Loan Amount'}</h3>
+                  <p className="stat-value">TZS {formatPrice(totalLoanAmount)}</p>
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-info">
+                  <h3>{t.totalAmountRemain || 'Total Amount Remain'}</h3>
+                  <p className="stat-value">TZS {formatPrice(totalAmountRemain)}</p>
+                </div>
+              </div>
             </div>
-            <div className="manager-loans-total-card">
-              <span className="manager-loans-total-label">{t.totalAmountRemain}</span>
-              <span className="manager-loans-total-value">TZS {formatPrice(totalAmountRemain)}</span>
+          </section>
+
+          <section className="manager-transactions-table-section old-loans-section">
+            <div className="manager-section-title-row">
+              <h3 className="manager-section-title">{t.oldLoans || 'Old Loans'}</h3>
+              <div className="search-box old-loans-inline-search">
+                <FaSearch className="search-icon" />
+                <input
+                  type="text"
+                  placeholder={t.searchPlaceholderLoans || 'Search old loans...'}
+                  value={oldLoansSearchTerm}
+                  onChange={(e) => setOldLoansSearchTerm(e.target.value)}
+                  className="search-input"
+                />
+              </div>
+              <span className="manager-filter-summary">
+                {searchTerm || statusFilter !== 'All' || timeFilter !== 'all' || showPaidTodayOnly
+                  ? t.showingXOfYLoans
+                      ? t.showingXOfYLoans.replace('{x}', sortedFilteredOldLoans.length).replace('{y}', oldLoansBase.length)
+                      : `Showing ${sortedFilteredOldLoans.length} of ${oldLoansBase.length}`
+                  : `Showing ${sortedFilteredOldLoans.length}`}
+                {sortedFilteredOldLoans.length > 0 && t.sortedByDateNewest}
+              </span>
+              <button
+                type="button"
+                onClick={handlePrintOldLoans}
+                className="action-btn print"
+                style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <FaPrint className="action-icon" />
+                <span className="action-text">{t.print || 'Print'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAddLoanPaymentId('');
+                  setAddLoanStatus('Pending');
+                  setShowAddLoanModal(true);
+                }}
+                className="action-btn add"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <FaMoneyBillWave className="action-icon" />
+                <span className="action-text">{t.addLoan || 'Add Loan'}</span>
+              </button>
+            </div>
+
+            <div className="table-container">
+              <table className="items-table">
+                <thead>
+                  <tr>
+                    <th>{t.actions}</th>
+                    <th>{t.customer}</th>
+                    <th>{t.amountReceived || 'Amount Received'}</th>
+                    <th>{t.amountRemain}</th>
+                    <th>{t.discount || 'Discount'}</th>
+                    <th>{t.paymentMethod}</th>
+                    <th>{t.status}</th>
+                    <th>{t.date}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedFilteredOldLoans.length === 0 ? (
+                    <tr>
+                      <td colSpan="8" className="no-data">
+                        {t.noOldLoans || 'No old loans found'}
+                      </td>
+                    </tr>
+                  ) : (
+                    sortedFilteredOldLoans.map((payment) => {
+                      const amountRemainFromDB = payment.amount_remain != null ? Number(payment.amount_remain) : null;
+                      const discountFromDB = payment.discount_amount != null ? Number(payment.discount_amount) : null;
+
+                      // For old loans we expect remain <= 0, but keep the same display logic as outstanding.
+                      const discount = discountFromDB ?? 0;
+                      const totalAmountFromDB = Number(payment.total_amount) || 0;
+                      const receivedFromDB = Number(payment.amount_received) || 0;
+                      const totalAfterDiscount = Math.max(0, totalAmountFromDB - discount);
+
+                      let displayAmountRemain;
+                      if (amountRemainFromDB != null) {
+                        displayAmountRemain = discount > 0 ? Math.max(0, amountRemainFromDB - discount) : amountRemainFromDB;
+                      } else {
+                        displayAmountRemain = Math.max(0, totalAfterDiscount - receivedFromDB);
+                      }
+
+                      return (
+                        <tr key={payment.id}>
+                          <td>
+                            <div className="action-buttons">
+                              <button
+                                className="action-btn view"
+                                title={t.viewDetails}
+                                onClick={() => handleView(payment)}
+                              >
+                                <FaEye className="action-icon" />
+                                <span className="action-text">{t.view}</span>
+                              </button>
+                              <button
+                                className="action-btn edit"
+                                title={t.edit || 'Edit'}
+                                onClick={() => handleEdit(payment)}
+                              >
+                                <FaEdit className="action-icon" />
+                                <span className="action-text">{t.edit || 'Edit'}</span>
+                              </button>
+                              <button
+                                className="action-btn print"
+                                title="Print Details"
+                                onClick={() => handlePrintLoanDetails(payment)}
+                              >
+                                <FaPrint className="action-icon" />
+                                <span className="action-text">Print Details</span>
+                              </button>
+                              <button
+                                className="action-btn download"
+                                title="Download Details"
+                                onClick={() => handleDownloadLoanDetails(payment)}
+                              >
+                                <FaDownload className="action-icon" />
+                                <span className="action-text">Download</span>
+                              </button>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="customer-info">
+                              <FaUsers className="info-icon" />
+                              <div>
+                                <div className="info-name">{capitalizeName(payment.customer_name)}</div>
+                                <div className="info-detail">{payment.customer_phone}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="amount-cell">
+                            {receivedFromDB != null ? `TZS ${formatPrice(receivedFromDB)}` : '—'}
+                          </td>
+                          <td className="amount-cell">
+                            {displayAmountRemain != null ? `TZS ${formatPrice(displayAmountRemain)}` : '—'}
+                          </td>
+                          <td className="amount-cell">
+                            {discountFromDB != null ? `TZS ${formatPrice(discountFromDB)}` : '—'}
+                          </td>
+                          <td>
+                            <span className="payment-method-badge">{payment.payment_method || '—'}</span>
+                          </td>
+                          <td>
+                            <span
+                              className={`status-badge ${
+                                payment.status === 'Approved'
+                                  ? 'approved'
+                                  : payment.status === 'Rejected'
+                                  ? 'rejected'
+                                  : 'pending'
+                              }`}
+                            >
+                              {payment.status === 'Approved' && <FaCheckCircle />}
+                              {payment.status === 'Rejected' && <FaTimesCircle />}
+                              {payment.status === 'Pending' && <FaClock />}
+                              {payment.status}
+                            </span>
+                          </td>
+                          <td>{formatDateTime(payment.created_at)}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </section>
         </div>
       </div>
+
+      {showAddLoanModal && (
+        <div className="modal-overlay" onClick={() => setShowAddLoanModal(false)}>
+          <div className="modal-content view-modal loan-edit-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{t.addLoan || 'Add Loan'}</h2>
+              <button className="close-btn" onClick={() => setShowAddLoanModal(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <div className="view-content">
+              <div className="view-section">
+                <div className="view-item">
+                  <label>{t.paymentId || 'Payment ID'}</label>
+                  <div className="view-value">
+                    <select
+                      value={addLoanPaymentId}
+                      onChange={(e) => setAddLoanPaymentId(e.target.value)}
+                      className="loan-edit-input"
+                      required
+                    >
+                      <option value="">{t.selectPayment || 'Select payment'}</option>
+                      {loansForAdd.map((p) => (
+                        <option key={p.id} value={String(p.id)}>
+                          #{p.id} - {capitalizeName(p.customer_name || '')} - Remain: TZS {formatPrice(getAmountRemain(p))}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.customerId || 'Customer ID'}</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      className="loan-edit-input"
+                      value={addLoanCustomerIdInput}
+                      onChange={(e) => setAddLoanCustomerIdInput(e.target.value.replace(/[^\d]/g, ''))}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.customer || 'Customer Name'}</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      className="loan-edit-input"
+                      value={addLoanCustomerNameInput}
+                      onChange={(e) => setAddLoanCustomerNameInput(e.target.value)}
+                      style={{ textTransform: 'uppercase' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.phone || 'Customer Phone'}</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      className="loan-edit-input"
+                      value={addLoanCustomerPhoneInput}
+                      onChange={(e) => setAddLoanCustomerPhoneInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.sparePart || 'Spareparts'}</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      className="loan-edit-input"
+                      value={addLoanSparepartsInput}
+                      onChange={(e) => setAddLoanSparepartsInput(e.target.value)}
+                      placeholder="e.g. 5,9,12"
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.totalAmount || 'Total Amount'}</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanTotalAmountInput}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setAddLoanTotalAmountInput(filtered);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.discount || 'Discount'}</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanDiscountInput}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setAddLoanDiscountInput(filtered);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.amountReceived || 'Amount Received'}</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanAmountReceivedInput}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setAddLoanAmountReceivedInput(filtered);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.amountRemain || 'Amount Remain'}</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanAmountRemainInput}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, '');
+                        const parts = v.split('.');
+                        const filtered = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('').slice(0, 2) : v;
+                        setAddLoanAmountRemainInput(filtered);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>Cash</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanCashInput}
+                      onChange={(e) => setAddLoanCashInput(e.target.value.replace(/[^\d.]/g, ''))}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>Bank Transfer</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanBankTransferInput}
+                      onChange={(e) => setAddLoanBankTransferInput(e.target.value.replace(/[^\d.]/g, ''))}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>Airtel Money</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanAirtelMoneyInput}
+                      onChange={(e) => setAddLoanAirtelMoneyInput(e.target.value.replace(/[^\d.]/g, ''))}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>M-Pesa</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanMpesaInput}
+                      onChange={(e) => setAddLoanMpesaInput(e.target.value.replace(/[^\d.]/g, ''))}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>Mix by YAS</label>
+                  <div className="view-value">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="loan-edit-input"
+                      value={addLoanMixByYasInput}
+                      onChange={(e) => setAddLoanMixByYasInput(e.target.value.replace(/[^\d.]/g, ''))}
+                    />
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>{t.status || 'Status'}</label>
+                  <div className="view-value">
+                    <select
+                      value={addLoanStatus}
+                      onChange={(e) => setAddLoanStatus(e.target.value)}
+                      className="loan-edit-input"
+                      required
+                    >
+                      <option value="Pending">Pending</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Rejected">Rejected</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="cancel-btn" onClick={() => setShowAddLoanModal(false)} disabled={addLoanSaving}>
+                {t.cancel || 'Cancel'}
+              </button>
+              <button className="loan-edit-save-btn" onClick={handleAddLoan} disabled={addLoanSaving}>
+                {addLoanSaving ? (t.saving || 'Saving...') : (t.save || 'Save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showViewModal && selectedPayment && (() => {
         const amountRemainVal = selectedPayment.amount_remain != null
@@ -1441,6 +2438,12 @@ function ManagerLoans() {
                     <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>{selectedPayment.customer_phone}</div>
                   </div>
                 </div>
+                    <div className="view-item">
+                      <label>{t.previousAmountReceived || 'Previous Amount Received'}</label>
+                      <div className="view-value" style={{ fontWeight: 'bold' }}>
+                        {selectedPayment.amount_received != null ? `TZS ${formatPrice(Number(selectedPayment.amount_received) || 0)}` : '—'}
+                      </div>
+                    </div>
                 <div className="view-item">
                   <label>{t.amountReceived}</label>
                   <input
@@ -1460,13 +2463,19 @@ function ManagerLoans() {
                 <div className="view-item">
                   <label>Amount Remain</label>
                   <div className="view-value" style={{ fontWeight: 'bold' }}>
-                    TZS {formatPrice(
-                      selectedPayment.amount_remain != null && editAmountReceived === String(selectedPayment.amount_received ?? '')
-                        ? Number(selectedPayment.amount_remain)
-                        : Math.max(
-                            0,
-                            (Number(selectedPayment.total_amount) || 0) - parseCommaNumber(editAmountReceived)
-                          )
+                    TZS{' '}
+                    {formatPrice(
+                      Math.max(
+                        0,
+                        (() => {
+                          const previousReceived = Number(selectedPayment.amount_received) || 0;
+                          const deltaReceived = parseCommaNumber(editAmountReceived);
+                          const total = Number(selectedPayment.total_amount) || 0;
+                          const discount = Number(selectedPayment.discount_amount) || 0;
+                          const totalAfterDiscount = Math.max(0, total - discount);
+                          return totalAfterDiscount - (previousReceived + deltaReceived);
+                        })()
+                      )
                     )}
                   </div>
                 </div>

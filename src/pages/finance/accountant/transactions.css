@@ -1,3 +1,57 @@
+/* Admin: operation date toggle + calendar panel */
+.admin-operation-date-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #2c3e50;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.admin-operation-date-btn:hover {
+  border-color: #1a3a5f;
+  color: #1a3a5f;
+}
+
+.admin-operation-date-btn.active {
+  background: #1a3a5f;
+  border-color: #1a3a5f;
+  color: #fff;
+}
+
+.admin-operation-date-btn .admin-date-filter-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #28a745;
+  margin-left: 2px;
+}
+
+.admin-operation-date-btn.active .admin-date-filter-dot {
+  background: #7dffb3;
+}
+
+.admin-operation-date-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  flex-basis: 100%;
+  padding: 12px 14px;
+  margin-top: 4px;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
 /* Date filter */
 .transactions-section .filter-label {
   font-size: 0.85rem;

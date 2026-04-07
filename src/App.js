@@ -17,6 +17,8 @@ import SpareParts from './pages/admin/spareparts';
 import Sales from './pages/admin/sales';
 import Employees from './pages/admin/employees';
 import Finances from './pages/admin/finances';
+import AdminReports from './pages/admin/reports';
+import AdminTransactions from './pages/admin/transactions';
 import Messages from './pages/admin/messages';
 import Settings from './pages/admin/setting';
 import CategoriesBrands from './pages/admin/categories&brands';
@@ -32,6 +34,7 @@ import CashierDashboard from './pages/finance/cashier/dashboard';
 import CashierTransactions from './pages/finance/cashier/transactions';
 import CashierReceipts from './pages/finance/cashier/receipts';
 import CashierReports from './pages/finance/cashier/reports';
+import CashierLoans from './pages/finance/cashier/loans';
 import ManagerDashboard from './pages/manager/dashboard';
 import ManagerTransactions from './pages/manager/transactions';
 import ManagerLoans from './pages/manager/loans';
@@ -79,7 +82,7 @@ function AutoLogoutWatcher() {
 
   useAutoLogout({
     enabled: Boolean(enabled),
-    inactivityMs: 5 * 60 * 1000,
+    inactivityMs: 30 * 60 * 1000,
     warningMs: 30 * 1000,
     onLogout,
   });
@@ -108,6 +111,8 @@ function App() {
         <Route path="/admin/sales" element={<Sales />} />
         <Route path="/admin/employees" element={<Employees />} />
         <Route path="/admin/finances" element={<Finances />} />
+        <Route path="/admin/reports" element={<AdminReports />} />
+        <Route path="/admin/transactions" element={<AdminTransactions />} />
         <Route path="/admin/messages" element={<Messages />} />
         <Route path="/admin/categories-brands" element={<CategoriesBrands />} />
         <Route path="/admin/settings" element={<Settings />} />
@@ -132,6 +137,7 @@ function App() {
         <Route path="/finance/cashier/dashboard" element={<CashierDashboard />} />
         <Route path="/finance/cashier/transactions" element={<CashierTransactions />} />
         <Route path="/finance/cashier/receipts" element={<CashierReceipts />} />
+        <Route path="/finance/cashier/loans" element={<CashierLoans />} />
         <Route path="/finance/cashier/reports" element={<CashierReports />} />
         
         {/* Manager Routes */}

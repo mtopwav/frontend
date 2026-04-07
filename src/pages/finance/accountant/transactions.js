@@ -13,18 +13,25 @@ import {
   FaArrowUp,
   FaSearch,
   FaFilter,
+  FaCalendarAlt,
   FaEye,
+  FaUsers,
+  FaBox,
+  FaPrint,
   FaCheckCircle,
   FaTimesCircle,
   FaClock,
 } from 'react-icons/fa';
-import './dashboard.css';
+import '../cashier/dashboard.css';
 import './transactions.css';
+import '../../sales/payments.css';
+import '../cashier/reports.css';
 import logo from '../../../images/logo.png';
 import { getPayments } from '../../../services/api';
 import Swal from 'sweetalert2';
 import ThemeToggle from '../../../components/ThemeToggle';
 import LanguageSelector from '../../../components/LanguageSelector';
+import { getCurrentDateTime } from '../../../utils/dateTime';
 
 function AccountantTransactions() {
   const navigate = useNavigate();
@@ -34,12 +41,13 @@ function AccountantTransactions() {
   const [loading, setLoading] = useState(true);
   const [payments, setPayments] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState('All');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [showViewModal, setShowViewModal] = useState(false);
   const [logoDataUrl, setLogoDataUrl] = useState(null);
+  const [currentDateTime, setCurrentDateTime] = useState(getCurrentDateTime());
 
   useEffect(() => {
     const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -95,6 +103,14 @@ function AccountantTransactions() {
       .catch(() => {});
   }, []);
 
+  // Update date-time display every second
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setCurrentDateTime(getCurrentDateTime());
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, []);
+
   const handleLogout = async () => {
     const result = await Swal.fire({
       icon: 'question',
@@ -125,6 +141,14 @@ function AccountantTransactions() {
     return new Intl.NumberFormat('en-TZ', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(num);
   };
 
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-TZ', {
+      style: 'currency',
+      currency: 'TZS',
+      minimumFractionDigits: 0
+    }).format(amount || 0);
+  };
+
   const formatDateTime = (dateStr) => {
     if (!dateStr) return '—';
     const d = new Date(dateStr);
@@ -138,40 +162,225 @@ function AccountantTransactions() {
     });
   };
 
-  const isInDateRange = (dateStr, from, to) => {
-    if (!dateStr) return false;
-    if (!from && !to) return true;
-    const d = new Date(dateStr);
-    if (Number.isNaN(d.getTime())) return false;
-    const dateOnly = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    if (from && dateOnly < from) return false;
-    if (to && dateOnly > to) return false;
+  const toNum = (v) => Number(v) || 0;
+  const toNumPayment = (v) => Number(v) || 0;
+
+  const normalizePaymentMethod = (value) =>
+    String(value || '')
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const isMpesaPaymentMethod = (value) => {
+    const m = normalizePaymentMethod(value);
+    return m === 'mpesa' || m === 'm-pesa' || m.includes('mpesa') || m.includes('m-pesa');
+  };
+
+  const isAirtelMoneyPaymentMethod = (value) => {
+    const m = normalizePaymentMethod(value);
+    return m.includes('airtel');
+  };
+
+  const isYasPaymentMethod = (value) => {
+    const m = normalizePaymentMethod(value);
+    return (m.includes('mix') && m.includes('yas')) || m === 'yas';
+  };
+
+  const isMobilePaymentMethod = (value) =>
+    isMpesaPaymentMethod(value) || isAirtelMoneyPaymentMethod(value) || isYasPaymentMethod(value);
+
+  const hasAnyChannelAmount = (p) =>
+    toNumPayment(p.cash) +
+      toNumPayment(p.bank_transfer) +
+      toNumPayment(p.airtel_money) +
+      toNumPayment(p.mpesa) +
+      toNumPayment(p.mix_by_yas) >
+    0;
+
+  const getRecordDateForReports = (payment) => {
+    if (!payment) return null;
+    const isLoan = String(payment?.payment_type ?? '').trim().toLowerCase() === 'loan';
+    if (isLoan) return payment.updated_at || payment.created_at;
+    if (payment.approved_at || payment.approvedAt || payment.confirmed_at) {
+      return payment.approved_at || payment.approvedAt || payment.confirmed_at;
+    }
+    return payment.created_at;
+  };
+
+  const filterByDateRange = (paymentList) => {
+    if (!dateFrom && !dateTo) return paymentList;
+    return paymentList.filter((p) => {
+      const recordDate = getRecordDateForReports(p);
+      if (!recordDate) return false;
+      const d = new Date(recordDate);
+      if (Number.isNaN(d.getTime())) return false;
+      const dateOnly = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate()
+      ).padStart(2, '0')}`;
+      if (dateFrom && dateOnly < dateFrom) return false;
+      if (dateTo && dateOnly > dateTo) return false;
+      return true;
+    });
+  };
+
+  const paymentMatchesSelectedMethod = (p) => {
+    if (paymentMethodFilter === 'all') return true;
+    const m = String(p.payment_method || '').toLowerCase().trim();
+    const cash = toNumPayment(p.cash);
+    const bank = toNumPayment(p.bank_transfer);
+    const airtel = toNumPayment(p.airtel_money);
+    const mpesa = toNumPayment(p.mpesa);
+    const yas = toNumPayment(p.mix_by_yas);
+    const hasCh = hasAnyChannelAmount(p);
+
+    if (paymentMethodFilter === 'cash') {
+      if (cash > 0) return true;
+      if (!hasCh && m === 'cash') return true;
+      return false;
+    }
+    if (paymentMethodFilter === 'bank') {
+      if (bank > 0) return true;
+      if (!hasCh && m === 'bank transfer') return true;
+      return false;
+    }
+    if (paymentMethodFilter === 'mpesa') {
+      if (mpesa > 0) return true;
+      if (!hasCh && isMpesaPaymentMethod(p.payment_method)) return true;
+      return false;
+    }
+    if (paymentMethodFilter === 'airtel') {
+      if (airtel > 0) return true;
+      if (!hasCh && isAirtelMoneyPaymentMethod(p.payment_method)) return true;
+      return false;
+    }
+    if (paymentMethodFilter === 'yas') {
+      if (yas > 0) return true;
+      if (!hasCh && isYasPaymentMethod(p.payment_method)) return true;
+      return false;
+    }
+    if (paymentMethodFilter === 'mobile') {
+      if (mpesa > 0 || airtel > 0 || yas > 0) return true;
+      if (!hasCh && isMobilePaymentMethod(p.payment_method)) return true;
+      return false;
+    }
     return true;
   };
 
-  const filteredPayments = payments.filter((p) => {
+  // Match cashier/reports data pipeline: date -> method -> search.
+  const timeFilteredPayments = filterByDateRange(payments);
+  const methodFilteredPayments = timeFilteredPayments.filter((p) => paymentMatchesSelectedMethod(p));
+  const filteredPayments = methodFilteredPayments.filter((p) => {
     const term = (searchTerm || '').toLowerCase();
-    const matchesSearch =
+    return (
       !term ||
       (p.customer_name && p.customer_name.toLowerCase().includes(term)) ||
       (p.customer_phone && p.customer_phone.includes(term)) ||
       (p.sparepart_name && p.sparepart_name.toLowerCase().includes(term)) ||
       (p.sparepart_number && p.sparepart_number?.toLowerCase().includes(term)) ||
-      (p.items && p.items.some((i) => (i.sparepart_name || '').toLowerCase().includes(term) || (i.sparepart_number || '').toLowerCase().includes(term)));
-    const matchesPaymentMethod =
-      paymentMethodFilter === 'All' ||
-      (p.payment_method || 'Unknown') === paymentMethodFilter;
-    const matchesTime = isInDateRange(p.created_at, dateFrom, dateTo);
-    return matchesSearch && matchesPaymentMethod && matchesTime;
+      (p.items &&
+        p.items.some(
+          (i) =>
+            (i.sparepart_name || '').toLowerCase().includes(term) ||
+            (i.sparepart_number || '').toLowerCase().includes(term)
+        ))
+    );
   });
 
-  const uniquePaymentMethods = Array.from(
-    new Set(
-      payments
-        .map((p) => p.payment_method || 'Unknown')
-        .filter((m) => m && m.trim() !== '')
-    )
+  // Date + search only (ignore payment method filter), like cashier reports cards.
+  const dateAndSearchPayments = timeFilteredPayments.filter((p) => {
+    const term = (searchTerm || '').toLowerCase();
+    return (
+      !term ||
+      (p.customer_name && p.customer_name.toLowerCase().includes(term)) ||
+      (p.customer_phone && p.customer_phone.includes(term)) ||
+      (p.sparepart_name && p.sparepart_name.toLowerCase().includes(term)) ||
+      (p.sparepart_number && p.sparepart_number?.toLowerCase().includes(term)) ||
+      (p.items &&
+        p.items.some(
+          (i) =>
+            (i.sparepart_name || '').toLowerCase().includes(term) ||
+            (i.sparepart_number || '').toLowerCase().includes(term)
+        ))
+    );
+  });
+
+  const isLoanPaymentType = (p) => String(p?.payment_type ?? '').trim().toLowerCase() === 'loan';
+  const isSalesPaymentType = (p) => String(p?.payment_type ?? '').trim().toLowerCase() === 'sales';
+
+  const getAmountRemain = (p) => {
+    const dbRemain = p.amount_remain != null ? Number(p.amount_remain) : null;
+    if (dbRemain != null && !Number.isNaN(dbRemain)) return dbRemain;
+    const total = Number(p.total_amount) || 0;
+    const discount = Number(p.discount_amount) || 0;
+    const received = Number(p.amount_received) || 0;
+    return Math.max(0, total - discount - received);
+  };
+
+  const loansForCards = dateAndSearchPayments.filter((p) => isLoanPaymentType(p) && p.status === 'Approved');
+  const receiptsForCards = dateAndSearchPayments.filter((p) => isSalesPaymentType(p) && p.status !== 'Pending');
+  const cardsPayments = [...loansForCards, ...receiptsForCards];
+
+  const cashTotal = receiptsForCards.reduce((sum, p) => sum + toNum(p.cash), 0);
+  const bankTotal = receiptsForCards.reduce((sum, p) => sum + toNum(p.bank_transfer), 0);
+  const airtelTotal = receiptsForCards.reduce((sum, p) => sum + toNum(p.airtel_money), 0);
+  const mpesaTotal = receiptsForCards.reduce((sum, p) => sum + toNum(p.mpesa), 0);
+  const yasTotal = receiptsForCards.reduce((sum, p) => sum + toNum(p.mix_by_yas), 0);
+
+  // Loan paid: Approved + loan type + amount_received > 0 + positive amount due.
+  const loanPaidPayments = dateAndSearchPayments.filter((p) => {
+    if (p.status !== 'Approved') return false;
+    const received = Number(p.amount_received) || 0;
+    if (received <= 0) return false;
+    if (!isLoanPaymentType(p)) return false;
+    const total = Number(p.total_amount) || 0;
+    const discount = Number(p.discount_amount) || 0;
+    const netDue = Math.max(0, total - discount);
+    if (netDue <= 0) return false;
+    const remain = getAmountRemain(p);
+    if (Number.isNaN(remain)) return false;
+    return remain === 0 || remain > 0;
+  });
+
+  const loanPaidTotal = loanPaidPayments.reduce((sum, p) => sum + (Number(p.amount_received) || 0), 0);
+  const loanPaidCount = loanPaidPayments.length;
+
+  const loanPaidCashTotal = loanPaidPayments.reduce((sum, p) => sum + toNum(p.cash), 0);
+  const loanPaidBankTotal = loanPaidPayments.reduce((sum, p) => sum + toNum(p.bank_transfer), 0);
+  const loanPaidAirtelTotal = loanPaidPayments.reduce((sum, p) => sum + toNum(p.airtel_money), 0);
+  const loanPaidMpesaTotal = loanPaidPayments.reduce((sum, p) => sum + toNum(p.mpesa), 0);
+  const loanPaidYasTotal = loanPaidPayments.reduce((sum, p) => sum + toNum(p.mix_by_yas), 0);
+  const loanPaidCreditTotal = loanPaidPayments
+    .filter((p) => {
+      const m = String(p.payment_method || '').trim().toLowerCase();
+      return m === 'credit' || m === 'credit card';
+    })
+    .reduce((sum, p) => sum + toNum(p.amount_received), 0);
+
+  const totalDirectSales = cashTotal + bankTotal + airtelTotal + mpesaTotal + yasTotal;
+  const totalAmountReceivedForCards = totalDirectSales + loanPaidTotal;
+  const approvedCountForCards = cardsPayments.filter((p) => p.status === 'Approved').length;
+  const selectedMethodLabel =
+    paymentMethodFilter === 'cash'
+      ? 'Cash'
+      : paymentMethodFilter === 'bank'
+      ? 'Bank Transfer'
+      : paymentMethodFilter === 'mobile'
+      ? 'Mobile'
+      : paymentMethodFilter === 'mpesa'
+      ? 'M-Pesa'
+      : paymentMethodFilter === 'airtel'
+      ? 'Airtel Money'
+      : paymentMethodFilter === 'yas'
+      ? 'Mix by YAS'
+      : 'All methods';
+
+  const selectedMethodApprovedPayments = filteredPayments.filter((p) => p.status === 'Approved');
+  const selectedMethodTotalAmount = selectedMethodApprovedPayments.reduce(
+    (sum, p) => sum + (Number(p.amount_received) || 0),
+    0
   );
+  const selectedMethodCount = selectedMethodApprovedPayments.length;
 
   const isApprovedPayment = (p) => {
     const total = Number(p.total_amount) || 0;
@@ -240,6 +449,189 @@ function AccountantTransactions() {
     return 'pending';
   };
 
+  const getStatusLabel = (status) => {
+    if (status === 'Approved') return 'Approved';
+    if (status === 'Rejected') return 'Rejected';
+    return 'Pending';
+  };
+
+  const paymentMethodWithAmount = (p) => {
+    const method = String(p?.payment_method || '—').trim() || '—';
+    const amt = Number(p?.amount_received) || 0;
+    return amt > 0 ? `${method} · ${formatCurrency(amt)}` : method;
+  };
+
+  const getPaymentChannelsList = (p) => {
+    if (!p) return [];
+    const toN = (v) => Number(v) || 0;
+    return [
+      { label: 'Cash', val: toN(p.cash) },
+      { label: 'Bank Transfer', val: toN(p.bank_transfer) },
+      { label: 'Airtel Money', val: toN(p.airtel_money) },
+      { label: 'M-Pesa', val: toN(p.mpesa) },
+      { label: 'Mix by YAS', val: toN(p.mix_by_yas) },
+    ].filter((c) => c.val > 0);
+  };
+
+  const paymentMethodForPrintRow = (p) => {
+    const channels = getPaymentChannelsList(p);
+    if (channels.length >= 2) {
+      return channels.map((c) => `${c.label} ${formatCurrency(c.val)}`).join('\n');
+    }
+    if (channels.length === 1) {
+      return `${channels[0].label} ${formatCurrency(channels[0].val)}`;
+    }
+    return paymentMethodWithAmount(p);
+  };
+
+  const amountReceivedForPrintRow = (p) => {
+    const channels = getPaymentChannelsList(p);
+    if (channels.length > 0) return channels.reduce((s, c) => s + c.val, 0);
+    return Number(p?.amount_received) || 0;
+  };
+
+  /** Amount + label for selected print filter only (split payments -> one/multi selected channels). */
+  const getSelectedChannelForPrint = (p) => {
+    const m = String(p.payment_method || '').toLowerCase().trim();
+    const hasCh = hasAnyChannelAmount(p);
+    const recv = Number(p.amount_received) || 0;
+
+    switch (paymentMethodFilter) {
+      case 'cash': {
+        const v = toNumPayment(p.cash);
+        if (v > 0) return { label: 'Cash', val: v };
+        if (!hasCh && m === 'cash') return { label: 'Cash', val: recv };
+        return null;
+      }
+      case 'bank': {
+        const v = toNumPayment(p.bank_transfer);
+        if (v > 0) return { label: 'Bank Transfer', val: v };
+        if (!hasCh && m === 'bank transfer') return { label: 'Bank Transfer', val: recv };
+        return null;
+      }
+      case 'mpesa': {
+        const v = toNumPayment(p.mpesa);
+        if (v > 0) return { label: 'M-Pesa', val: v };
+        if (!hasCh && isMpesaPaymentMethod(p.payment_method)) return { label: 'M-Pesa', val: recv };
+        return null;
+      }
+      case 'airtel': {
+        const v = toNumPayment(p.airtel_money);
+        if (v > 0) return { label: 'Airtel Money', val: v };
+        if (!hasCh && isAirtelMoneyPaymentMethod(p.payment_method)) return { label: 'Airtel Money', val: recv };
+        return null;
+      }
+      case 'yas': {
+        const v = toNumPayment(p.mix_by_yas);
+        if (v > 0) return { label: 'Mix by YAS', val: v };
+        if (!hasCh && isYasPaymentMethod(p.payment_method)) return { label: 'Mix by YAS', val: recv };
+        return null;
+      }
+      case 'mobile': {
+        const vMpesa = toNumPayment(p.mpesa);
+        const vAirtel = toNumPayment(p.airtel_money);
+        const vYas = toNumPayment(p.mix_by_yas);
+        const sum = vMpesa + vAirtel + vYas;
+        if (sum > 0) {
+          const parts = [];
+          if (vMpesa > 0) parts.push(`M-Pesa ${formatCurrency(vMpesa)}`);
+          if (vAirtel > 0) parts.push(`Airtel Money ${formatCurrency(vAirtel)}`);
+          if (vYas > 0) parts.push(`Mix by YAS ${formatCurrency(vYas)}`);
+          return { label: parts.join('\n'), val: sum, isMultiLine: true };
+        }
+        if (!hasCh && isMobilePaymentMethod(p.payment_method)) {
+          return { label: String(p.payment_method || 'Mobile'), val: recv, isMultiLine: false };
+        }
+        return null;
+      }
+      default:
+        return null;
+    }
+  };
+
+  const paymentMethodForPrintRowScoped = (p) => {
+    if (paymentMethodFilter === 'all') return paymentMethodForPrintRow(p);
+    const sel = getSelectedChannelForPrint(p);
+    if (sel?.isMultiLine) return sel.label;
+    if (sel) return `${sel.label} · ${formatCurrency(sel.val)}`;
+    return paymentMethodForPrintRow(p);
+  };
+
+  const amountReceivedForPrintRowScoped = (p) => {
+    if (paymentMethodFilter === 'all') return amountReceivedForPrintRow(p);
+    const sel = getSelectedChannelForPrint(p);
+    if (sel) return sel.val;
+    return amountReceivedForPrintRow(p);
+  };
+
+  /** Totals for the printed report footer — same rows as the print table (`approvedForPrint`). */
+  const buildPrintSummaryFromApprovedRows = (approvedRows) => {
+    const toN = (v) => Number(v) || 0;
+    const isLoanT = (p) => String(p?.payment_type ?? '').trim().toLowerCase() === 'loan';
+    const isSalesT = (p) => String(p?.payment_type ?? '').trim().toLowerCase() === 'sales';
+
+    const receiptsSales = approvedRows.filter((p) => isSalesT(p) && p.status !== 'Pending');
+    const loanPaidRows = approvedRows.filter((p) => {
+      if (p.status !== 'Approved') return false;
+      const received = toN(p.amount_received);
+      if (received <= 0) return false;
+      if (!isLoanT(p)) return false;
+
+      const total = toN(p.total_amount);
+      const discount = toN(p.discount_amount);
+      const netDue = Math.max(0, total - discount);
+      if (netDue <= 0) return false;
+
+      const remain = getAmountRemain(p);
+      if (Number.isNaN(remain)) return false;
+
+      const loanFullyPaid = remain === 0;
+      const debtReduced = remain > 0;
+      return loanFullyPaid || debtReduced;
+    });
+
+    const cashTotal = receiptsSales.reduce((s, p) => s + toN(p.cash), 0);
+    const bankTotal = receiptsSales.reduce((s, p) => s + toN(p.bank_transfer), 0);
+    const airtelTotal = receiptsSales.reduce((s, p) => s + toN(p.airtel_money), 0);
+    const mpesaTotal = receiptsSales.reduce((s, p) => s + toN(p.mpesa), 0);
+    const yasTotal = receiptsSales.reduce((s, p) => s + toN(p.mix_by_yas), 0);
+
+    const totalDirectSales = cashTotal + bankTotal + airtelTotal + mpesaTotal + yasTotal;
+
+    const loanPaidTotal = loanPaidRows.reduce((s, p) => s + toN(p.amount_received), 0);
+    const loanPaidCashTotal = loanPaidRows.reduce((s, p) => s + toN(p.cash), 0);
+    const loanPaidBankTotal = loanPaidRows.reduce((s, p) => s + toN(p.bank_transfer), 0);
+    const loanPaidAirtelTotal = loanPaidRows.reduce((s, p) => s + toN(p.airtel_money), 0);
+    const loanPaidMpesaTotal = loanPaidRows.reduce((s, p) => s + toN(p.mpesa), 0);
+    const loanPaidYasTotal = loanPaidRows.reduce((s, p) => s + toN(p.mix_by_yas), 0);
+    const loanPaidCreditTotal = loanPaidRows
+      .filter((p) => {
+        const m = String(p.payment_method || '').trim().toLowerCase();
+        return m === 'credit' || m === 'credit card';
+      })
+      .reduce((s, p) => s + toN(p.amount_received), 0);
+
+    const totalAmount =
+      cashTotal + bankTotal + airtelTotal + mpesaTotal + yasTotal + loanPaidTotal;
+
+    return {
+      cashTotal,
+      bankTotal,
+      airtelTotal,
+      mpesaTotal,
+      yasTotal,
+      totalDirectSales,
+      loanPaidCashTotal,
+      loanPaidBankTotal,
+      loanPaidAirtelTotal,
+      loanPaidMpesaTotal,
+      loanPaidYasTotal,
+      loanPaidCreditTotal,
+      loanPaidTotal,
+      totalAmount,
+    };
+  };
+
   const handleView = (payment) => {
     setSelectedPayment(payment);
     setShowViewModal(true);
@@ -271,38 +663,56 @@ function AccountantTransactions() {
                 <th class="tl">Date</th>
                 <th class="tl">Customer</th>
                 <th class="tl">Items</th>
+                <th class="tc">Payment type</th>
                 <th class="tc">Payment method</th>
-                <th class="tr">Total (TZS)</th>
-                <th class="tr">Received (TZS)</th>
-                <th class="tr">Remain (TZS)</th>
+                <th class="tr">Amount received (TZS)</th>
+                <th class="tl">Status</th>
               </tr>
             </thead>`;
 
+    const selectedMethodPrintLabel = selectedMethodLabel;
+    const approvedForPrint = approvedPaymentsForTable.filter((p) => p.status === 'Approved');
+    const printSummary = buildPrintSummaryFromApprovedRows(approvedForPrint);
+    const selectedMethodPrintTotal = approvedForPrint.reduce(
+      (sum, p) => sum + amountReceivedForPrintRowScoped(p),
+      0
+    );
+    const selectedMethodPrintCount = approvedForPrint.length;
+
+    const singleDaySummaryNote =
+      dateFrom && dateTo && dateFrom === dateTo
+        ? `<div class="tax-inv-footer-row"><label>Summary scope:</label> All approved transactions on ${String(
+            dateFrom
+          ).replace(/</g, '&lt;')} (same as listed above).</div>`
+        : '';
+
     const rowsHtml =
-      approvedPaymentsForTable.length === 0
-        ? '<tbody><tr><td colspan="8" style="text-align:center;padding:12px;">No approved transactions found</td></tr></tbody>'
+      approvedForPrint.length === 0
+        ? '<tbody><tr><td colspan="8" style="text-align:center;padding:12px;">No transactions found</td></tr></tbody>'
         : '<tbody>' +
-          approvedPaymentsForTable
+          approvedForPrint
             .map((p, idx) => {
-              const total = Number(p.total_amount) || 0;
-              const received = Number(p.amount_received) || 0;
-              const amountRemain = total - received;
+              const received = amountReceivedForPrintRowScoped(p);
               const items =
                 p.items && p.items.length > 0
                   ? p.items
                       .map((item) => (item.sparepart_name || 'Unknown').replace(/</g, '&lt;'))
                       .join('<br />')
                   : (p.sparepart_name || '—').replace(/</g, '&lt;');
+              const paymentType = String(p.payment_type || '—').replace(/</g, '&lt;');
+              const paymentMethodCell = String(paymentMethodForPrintRowScoped(p) || '—')
+                .replace(/</g, '&lt;')
+                .replace(/\n/g, '<br />');
               return `
                 <tr>
                   <td class="tc">${idx + 1}</td>
-                  <td class="tl">${formatDateTime(p.created_at)}</td>
+                  <td class="tl">${getRecordDateForReports(p) ? formatDateTime(getRecordDateForReports(p)) : ''}</td>
                   <td class="tl">${(p.customer_name || '—').toUpperCase().replace(/</g, '&lt;')}</td>
                   <td class="tl">${items}</td>
-                  <td class="tc">${(p.payment_method || '—').replace(/</g, '&lt;')}</td>
-                  <td class="tr">${formatPrice(total)}</td>
-                  <td class="tr">${formatPrice(received)}</td>
-                  <td class="tr">${formatPrice(Math.max(0, amountRemain))}</td>
+                  <td class="tc">${paymentType}</td>
+                  <td class="tc">${paymentMethodCell}</td>
+                  <td class="tr">${formatCurrency(received)}</td>
+                  <td class="tl">${getStatusLabel(p.status)}</td>
                 </tr>
               `;
             })
@@ -417,7 +827,7 @@ function AccountantTransactions() {
               </div>
             </div>
             <div class="tax-inv-meta">
-              <p><strong>Report:</strong> Transactions (Approved)</p>
+              <p><strong>Report:</strong> Accountant Transactions</p>
               <p><strong>Period:</strong> ${dateRangeLabel}</p>
               <p><strong>Printed:</strong> ${new Date().toLocaleString('en-GB')}</p>
               <p><strong>Printed by:</strong> ${(user?.full_name || user?.username || 'Accountant').replace(/</g, '&lt;')}</p>
@@ -432,9 +842,32 @@ function AccountantTransactions() {
           </table>
 
           <div class="tax-inv-footer">
-            <div class="tax-inv-footer-row"><label>Total Cash (TZS):</label> ${formatPrice(totalCash)}</div>
-            <div class="tax-inv-footer-row"><label>Total Bank transfer (TZS):</label> ${formatPrice(totalBankTransfer)}</div>
-            <div class="tax-inv-footer-row"><label>Total Mobile payments (TZS):</label> ${formatPrice(totalMobilePayments)}</div>
+            ${
+              paymentMethodFilter !== 'all'
+                ? `
+            <div class="tax-inv-footer-row"><label>Payment method filter:</label> ${selectedMethodPrintLabel}</div>
+            <div class="tax-inv-footer-row"><label>Total (${selectedMethodPrintLabel}) (TZS):</label> ${formatCurrency(selectedMethodPrintTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Transactions (this method):</label> ${selectedMethodPrintCount}</div>
+            <p style="margin:12px 0 0;font-size:10px;color:#555;">Only transactions that include this method are listed. Amounts show the portion received via this method only.</p>
+            `
+                : `
+            ${singleDaySummaryNote}
+            <div class="tax-inv-footer-row"><label>Direct Sales by Cash (TZS):</label> ${formatCurrency(printSummary.cashTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Direct Sales by Bank transfer (TZS):</label> ${formatCurrency(printSummary.bankTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Direct Sales by Airtel Money (TZS):</label> ${formatCurrency(printSummary.airtelTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Direct Sales by M-Pesa (TZS):</label> ${formatCurrency(printSummary.mpesaTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Direct Sales by Mix by YAS (TZS):</label> ${formatCurrency(printSummary.yasTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Total Direct Sales (TZS):</label> ${formatCurrency(printSummary.totalDirectSales)}</div>
+            <div class="tax-inv-footer-row"><label>Loan paid by Cash (TZS):</label> ${formatCurrency(printSummary.loanPaidCashTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Loan paid by Bank transfer (TZS):</label> ${formatCurrency(printSummary.loanPaidBankTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Loan paid by Airtel Money (TZS):</label> ${formatCurrency(printSummary.loanPaidAirtelTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Loan paid by M-Pesa (TZS):</label> ${formatCurrency(printSummary.loanPaidMpesaTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Loan paid by Mix by YAS (TZS):</label> ${formatCurrency(printSummary.loanPaidYasTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Loan paid by Credit (TZS):</label> ${formatCurrency(printSummary.loanPaidCreditTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Total Loan paid (TZS):</label> ${formatCurrency(printSummary.loanPaidTotal)}</div>
+            <div class="tax-inv-footer-row"><label>Total amount received (TZS):</label> ${formatCurrency(printSummary.totalAmount)}</div>
+            `
+            }
           </div>
 
           <p class="tax-inv-disclaimer">*This is a computer generated transactions report, hence no signature is required.*</p>
@@ -497,7 +930,7 @@ function AccountantTransactions() {
         </nav>
       </aside>
       <div className="main-content">
-        <header className="finance-header">
+        <header className="payments-header">
           <div className="header-left">
             <button className="menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
               <FaBars />
@@ -505,6 +938,17 @@ function AccountantTransactions() {
             <h1 className="page-title">Accountant Transactions</h1>
           </div>
           <div className="header-right">
+            <div className="date-time-display" style={{ 
+              marginRight: '20px', 
+              fontSize: '14px', 
+              color: '#666',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px'
+            }}>
+              <FaCalendarAlt style={{ fontSize: '16px' }} />
+              <span>{currentDateTime}</span>
+            </div>
             <LanguageSelector />
             <ThemeToggle />
             <div className="user-info">
@@ -523,52 +967,229 @@ function AccountantTransactions() {
             <p className="transactions-page-desc">View sales and payment transactions.</p>
           </section>
 
-          <div className="stats-grid transactions-stats">
-            <div className="stat-card stat-primary">
-              <div className="stat-info">
-                <h3 className="stat-title">Total</h3>
-                <p className="stat-value">{filteredPayments.length}</p>
-              </div>
+          {/* Action bar (match cashier reports layout) */}
+          <div className="action-bar">
+            <div className="search-box">
+              <FaSearch className="search-icon" />
+              <input
+                type="text"
+                placeholder="Search by customer, phone, or spare part..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="search-input"
+              />
             </div>
+
+            <div className="reports-period-filter">
+              <label className="filter-label">From</label>
+              <input
+                type="date"
+                className="reports-period-select"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+            </div>
+
+            <div className="reports-period-filter">
+              <label className="filter-label">To</label>
+              <input
+                type="date"
+                className="reports-period-select"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
+            </div>
+
+            <div className="reports-period-filter">
+              <select
+                value={paymentMethodFilter}
+                onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                className="reports-period-select"
+              >
+                <option value="all">All payment methods</option>
+                <option value="cash">Cash</option>
+                <option value="bank">Bank Transfer</option>
+                <option value="mobile">Mobile</option>
+                <option value="mpesa">M-Pesa</option>
+                <option value="airtel">Airtel Money</option>
+                <option value="yas">Mix by YAS</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="action-btn print"
+              style={{
+                marginLeft: '15px',
+                padding: '10px 20px',
+                backgroundColor: '#1a3a5f',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                fontWeight: '500'
+              }}
+            >
+              <FaPrint />
+              <span>Print Transactions</span>
+            </button>
+          </div>
+
+          {/* Summary cards (match cashier reports layout) */}
+          <div className="stats-grid">
+            {paymentMethodFilter !== 'all' && (
+              <div className="stat-card stat-warning">
+                <div className="stat-info">
+                  <h3 className="stat-title">{selectedMethodLabel} (Approved)</h3>
+                  <p className="stat-value">{formatCurrency(selectedMethodTotalAmount)}</p>
+                  <p style={{ margin: '8px 0 0', fontSize: '0.8rem', opacity: 0.85 }}>
+                    {selectedMethodCount} transactions
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="stat-card stat-success">
               <div className="stat-info">
-                <h3 className="stat-title">Approved</h3>
-                <p className="stat-value">{approvedCount}</p>
+                <h3 className="stat-title">Total amount received</h3>
+                <p className="stat-value">{formatCurrency(totalAmountReceivedForCards)}</p>
               </div>
             </div>
-            <div className="stat-card stat-primary">
-              <div className="stat-info">
-                <h3 className="stat-title">Total Amount Received</h3>
-                <p className="stat-value">TZS {formatPrice(totalAmountReceived)}</p>
-              </div>
-            </div>
-            <div className="stat-card stat-warning">
-              <div className="stat-info">
-                <h3 className="stat-title">Loans</h3>
-                <p className="stat-value">TZS {formatPrice(totalAmountRemain)}</p>
-              </div>
-            </div>
+
             <div className="stat-card stat-info">
               <div className="stat-info">
-                <h3 className="stat-title">Cash</h3>
-                <p className="stat-value">TZS {formatPrice(totalCash)}</p>
+                <h3 className="stat-title">Approved</h3>
+                <p className="stat-value">{approvedCountForCards}</p>
               </div>
             </div>
+
+            <div className="stat-card stat-primary">
+              <div className="stat-info">
+                <h3 className="stat-title">Cash</h3>
+                <p className="stat-value">{formatCurrency(cashTotal)}</p>
+              </div>
+            </div>
+
             <div className="stat-card stat-primary">
               <div className="stat-info">
                 <h3 className="stat-title">Bank Transfer</h3>
-                <p className="stat-value">TZS {formatPrice(totalBankTransfer)}</p>
+                <p className="stat-value">{formatCurrency(bankTotal)}</p>
               </div>
             </div>
+
+            <div className="stat-card stat-primary">
+              <div className="stat-info">
+                <h3 className="stat-title">Airtel Money</h3>
+                <p className="stat-value">{formatCurrency(airtelTotal)}</p>
+              </div>
+            </div>
+
+            <div className="stat-card stat-primary">
+              <div className="stat-info">
+                <h3 className="stat-title">M-Pesa</h3>
+                <p className="stat-value">{formatCurrency(mpesaTotal)}</p>
+              </div>
+            </div>
+
+            <div className="stat-card stat-warning">
+              <div className="stat-info">
+                <h3 className="stat-title">Mix by YAS</h3>
+                <p className="stat-value">{formatCurrency(yasTotal)}</p>
+              </div>
+            </div>
+
             <div className="stat-card stat-success">
               <div className="stat-info">
-                <h3 className="stat-title">Mobile Payments</h3>
-                <p className="stat-value">TZS {formatPrice(totalMobilePayments)}</p>
+                <h3 className="stat-title">Loan Paid</h3>
+                <p className="stat-value">{formatCurrency(loanPaidTotal)}</p>
+                <p style={{ margin: '8px 0 0', fontSize: '0.82rem', opacity: 0.9 }}>
+                  Amount received: {formatCurrency(loanPaidTotal)}
+                </p>
+                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', opacity: 0.85 }}>
+                  {loanPaidCount} transactions
+                </p>
+                <p style={{ margin: '6px 0 0', fontSize: '0.78rem', opacity: 0.88, lineHeight: 1.4 }}>
+                  Airtel Money: {formatCurrency(loanPaidAirtelTotal)} <br />
+                  M-Pesa: {formatCurrency(loanPaidMpesaTotal)} <br />
+                  Mix by YAS: {formatCurrency(loanPaidYasTotal)}
+                </p>
               </div>
             </div>
           </div>
 
+          {/* Latest transactions table (match cashier reports table layout) */}
           <div className="transactions-section">
+            <div className="table-container" style={{ marginTop: '30px' }}>
+              <h2 style={{ marginBottom: '15px' }}>Recent Transactions</h2>
+              <table
+                className="transactions-table"
+                style={{ width: '8000px', minWidth: '8000px' }}
+              >
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>SparePart</th>
+                    <th>Payment Method</th>
+                    <th>Status</th>
+                    <th>Amount Received</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPayments.filter((p) => p.status === 'Approved').length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="no-data">
+                        No transactions found
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPayments
+                      .filter((p) => p.status === 'Approved')
+                      .slice(0, 20)
+                      .map((p) => (
+                        <tr
+                          key={p.id}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => handleView(p)}
+                          title="View details"
+                        >
+                          <td>
+                            {getRecordDateForReports(p)
+                              ? String(getRecordDateForReports(p)).replace('T', ' ').slice(0, 16)
+                              : ''}
+                          </td>
+                          <td>{capitalizeName(p.customer_name)}</td>
+                          <td>
+                            {p.items && p.items.length > 0 ? (
+                              <div>
+                                {p.items.map((item, idx) => (
+                                  <div key={idx} style={{ marginBottom: idx < p.items.length - 1 ? '5px' : '0' }}>
+                                    {capitalizeName(item.sparepart_name || 'Unknown')} ({(item.sparepart_number || 'N/A').toUpperCase()})
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              capitalizeName(p.sparepart_name || 'Unknown')
+                            )}
+                          </td>
+                          <td style={{ maxWidth: 220 }}>{paymentMethodWithAmount(p)}</td>
+                          <td>{getStatusLabel(p.status)}</td>
+                          <td>{formatCurrency(p.amount_received)}</td>
+                        </tr>
+                      ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="transactions-section" style={{ display: 'none' }}>
             <div className="section-header">
               <h2>Transaction Records</h2>
               <div className="section-actions">
@@ -579,12 +1200,13 @@ function AccountantTransactions() {
                     value={paymentMethodFilter}
                     onChange={(e) => setPaymentMethodFilter(e.target.value)}
                   >
-                    <option value="All">All payment methods</option>
-                    {uniquePaymentMethods.map((method) => (
-                      <option key={method} value={method}>
-                        {method}
-                      </option>
-                    ))}
+                    <option value="all">All payment methods</option>
+                    <option value="cash">Cash</option>
+                    <option value="bank">Bank Transfer</option>
+                    <option value="mobile">Mobile</option>
+                    <option value="mpesa">M-Pesa</option>
+                    <option value="airtel">Airtel Money</option>
+                    <option value="yas">Mix by YAS</option>
                   </select>
                 </div>
                 <div className="filter-group">
@@ -638,19 +1260,19 @@ function AccountantTransactions() {
             </div>
 
             <div className="table-container">
-              <table className="transactions-table">
+              <table className="payments-table">
                 <thead>
                   <tr>
-                    <th>S.No</th>
-                    <th>Date</th>
-                    <th>Customer</th>
-                    <th>Items</th>
-                    <th>Total (TZS)</th>
-                    <th>Payment</th>
-                    <th>Received</th>
-                    <th>Remain</th>
-                    <th>Status</th>
                     <th>Actions</th>
+                    <th>Receipt No</th>
+                    <th>Customer</th>
+                    <th>SparePart</th>
+                    <th>Total Amount</th>
+                    <th>Amount Received</th>
+                    <th>Amount Remain</th>
+                    <th>Payment Method</th>
+                    <th>Date</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -661,7 +1283,7 @@ function AccountantTransactions() {
                       </td>
                     </tr>
                   ) : (
-                    approvedPaymentsForTable.map((payment, index) => {
+                    approvedPaymentsForTable.map((payment) => {
                       const total = Number(payment.total_amount) || 0;
                       const received = Number(payment.amount_received) || 0;
                       const amountRemain = total - received;
@@ -673,35 +1295,75 @@ function AccountantTransactions() {
                           : 'Pending';
                       return (
                         <tr key={payment.id}>
-                          <td>{index + 1}</td>
-                          <td>{formatDateTime(payment.created_at)}</td>
                           <td>
-                            <div className="txn-customer-cell">
-                              <div className="txn-name">{capitalizeName(payment.customer_name)}</div>
-                              {payment.customer_phone && (
-                                <div className="txn-detail">{payment.customer_phone}</div>
-                              )}
+                            <div className="action-buttons">
+                              <button
+                                className="action-btn view"
+                                title="View"
+                                onClick={() => handleView(payment)}
+                              >
+                                <FaEye className="action-icon" />
+                              </button>
+                            </div>
+                          </td>
+                          <td>
+                            #{payment.id}
+                          </td>
+                          <td>
+                            <div className="customer-info">
+                              <FaUsers className="info-icon" />
+                              <div>
+                                <div className="info-name">{capitalizeName(payment.customer_name)}</div>
+                                {payment.customer_phone && (
+                                  <div className="info-detail">{payment.customer_phone}</div>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td>
                             {payment.items && payment.items.length > 0 ? (
-                              <span>
-                                {payment.items
-                                  .map((item) => capitalizeName(item.sparepart_name || 'Unknown'))
-                                  .join(', ')}
-                              </span>
+                              <div>
+                                {payment.items.map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="part-info"
+                                    style={{ marginBottom: idx < payment.items.length - 1 ? '8px' : '0' }}
+                                  >
+                                    <FaBox className="info-icon" />
+                                    <div>
+                                      <div className="info-name">
+                                        {capitalizeName(item.sparepart_name || 'Unknown')}
+                                      </div>
+                                      <div className="info-detail">
+                                        {(item.sparepart_number || 'N/A').toUpperCase()} - Qty: {item.quantity}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             ) : (
-                              <span>{capitalizeName(payment.sparepart_name || '—')}</span>
+                              <div className="part-info">
+                                <FaBox className="info-icon" />
+                                <div>
+                                  <div className="info-name">{capitalizeName(payment.sparepart_name || 'Unknown')}</div>
+                                  <div className="info-detail">
+                                    {(payment.sparepart_number || 'N/A').toUpperCase()}
+                                  </div>
+                                </div>
+                              </div>
                             )}
                           </td>
-                          <td className="txn-amount">TZS {formatPrice(payment.total_amount)}</td>
+                          <td className="amount-cell">TZS {formatPrice(payment.total_amount)}</td>
+                          <td className="amount-cell">
+                            {payment.amount_received != null ? `TZS ${formatPrice(payment.amount_received)}` : '—'}
+                          </td>
+                          <td className="amount-cell">TZS {formatPrice(Math.max(0, amountRemain))}</td>
                           <td>
                             <span className="payment-method-badge">{payment.payment_method || '—'}</span>
                           </td>
-                          <td className="txn-amount">
-                            {payment.amount_received != null ? `TZS ${formatPrice(payment.amount_received)}` : '—'}
+                          <td>
+                            {formatDateTime(payment.created_at)}
                           </td>
-                          <td className="txn-amount">TZS {formatPrice(Math.max(0, amountRemain))}</td>
                           <td>
                             <span className={`status-badge ${getStatusClass(displayStatus)}`}>
                               {displayStatus === 'Approved' && <FaCheckCircle />}
@@ -709,13 +1371,6 @@ function AccountantTransactions() {
                               {displayStatus === 'Pending' && <FaClock />}
                               {displayStatus}
                             </span>
-                          </td>
-                          <td>
-                            <div className="action-buttons">
-                              <button className="action-btn view" title="View" onClick={() => handleView(payment)}>
-                                <FaEye /> View
-                              </button>
-                            </div>
                           </td>
                         </tr>
                       );
@@ -729,7 +1384,7 @@ function AccountantTransactions() {
       </div>
 
       {showViewModal && selectedPayment && (
-        <div className="transactions-modal-overlay" onClick={() => setShowViewModal(false)}>
+        <div className="transactions-modal-overlay" onClick={() => setShowViewModal(false)} style={{ display: 'none' }}>
           <div className="transactions-modal-content transactions-view-form-wrapper" onClick={(e) => e.stopPropagation()}>
             <div className="transactions-modal-header">
               <h3>Transaction Details</h3>
@@ -861,6 +1516,104 @@ function AccountantTransactions() {
             </div>
             <div className="transactions-modal-footer">
               <button type="button" className="transactions-modal-btn secondary" onClick={() => setShowViewModal(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Match cashier reports modal layout */}
+      {showViewModal && selectedPayment && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowViewModal(false)}
+          style={{ zIndex: 2000 }}
+        >
+          <div
+            className="modal-content view-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 520 }}
+          >
+            <div className="modal-header">
+              <h2>Transaction details</h2>
+              <button
+                type="button"
+                className="close-btn"
+                onClick={() => setShowViewModal(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="view-content">
+              <div className="view-section">
+                <div className="view-item">
+                  <label>Date &amp; time</label>
+                  <div className="view-value">
+                    {selectedPayment.created_at
+                      ? selectedPayment.created_at.replace('T', ' ').slice(0, 16)
+                      : '—'}
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>Customer</label>
+                  <div className="view-value">
+                    {capitalizeName(selectedPayment.customer_name) || '—'}
+                    {selectedPayment.customer_phone && (
+                      <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '4px' }}>
+                        {selectedPayment.customer_phone}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>Spare part</label>
+                  <div className="view-value">
+                    {selectedPayment.items && selectedPayment.items.length > 0 ? (
+                      selectedPayment.items.map((item, idx) => (
+                        <div key={idx} style={{ marginBottom: idx < selectedPayment.items.length - 1 ? '6px' : '0' }}>
+                          {capitalizeName(item.sparepart_name || 'Unknown')} ({(item.sparepart_number || 'N/A').toUpperCase()})
+                        </div>
+                      ))
+                    ) : (
+                      <>
+                        {capitalizeName(selectedPayment.sparepart_name || '—')}
+                        {selectedPayment.sparepart_number && (
+                          <span style={{ color: '#666' }}>
+                            {' '}
+                            · {selectedPayment.sparepart_number.toUpperCase()}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>Payment method</label>
+                  <div className="view-value" style={{ fontWeight: 600 }}>
+                    {paymentMethodWithAmount(selectedPayment)}
+                  </div>
+                </div>
+
+                <div className="view-item">
+                  <label>Amount received</label>
+                  <div className="view-value">{formatCurrency(selectedPayment.amount_received)}</div>
+                </div>
+
+                <div className="view-item">
+                  <label>Status</label>
+                  <div className="view-value">{getStatusLabel(selectedPayment.status)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" className="cancel-btn" onClick={() => setShowViewModal(false)}>
                 Close
               </button>
             </div>

@@ -739,7 +739,11 @@ function CashierDashboard() {
           </Link>
           <Link to="/finance/cashier/receipts" className="nav-item">
             <FaFileInvoice className="nav-icon" />
-            <span>{t.receiptsLabel || 'Receipts'}</span>
+            <span>{t.payments || 'Payments'}</span>
+          </Link>
+          <Link to="/finance/cashier/loans" className="nav-item">
+            <FaMoneyBillWave className="nav-icon" />
+            <span>{t.loans || 'Loans'}</span>
           </Link>
           <Link to="/finance/cashier/reports" className="nav-item">
             <FaChartBar className="nav-icon" />

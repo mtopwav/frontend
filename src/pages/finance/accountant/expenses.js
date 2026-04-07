@@ -45,14 +45,14 @@ function AccountantExpenses() {
   const [submitting, setSubmitting] = useState(false);
   const [addForm, setAddForm] = useState({
     description: '',
-    category: EXPENSE_CATEGORIES[0],
+    category: '',
     amount: '',
     date: new Date().toISOString().slice(0, 10),
     status: 'Pending',
   });
   const [editForm, setEditForm] = useState({
     description: '',
-    category: EXPENSE_CATEGORIES[0],
+    category: '',
     amount: '',
     date: new Date().toISOString().slice(0, 10),
     status: 'Pending',
@@ -204,7 +204,7 @@ function AccountantExpenses() {
   const openAddModal = () => {
     setAddForm({
       description: '',
-      category: EXPENSE_CATEGORIES[0],
+      category: '',
       amount: '',
       date: new Date().toISOString().slice(0, 10),
       status: 'Pending',
@@ -235,13 +235,13 @@ function AccountantExpenses() {
       return;
     }
     const amountNum = parseFloat(String(addForm.amount).replace(/,/g, ''), 10);
-    if (!addForm.description.trim() || Number.isNaN(amountNum) || amountNum <= 0) return;
+    if (!addForm.description.trim() || !addForm.category.trim() || Number.isNaN(amountNum) || amountNum <= 0) return;
     setSubmitting(true);
     try {
       const res = await createExpense({
         date: addForm.date,
         description: addForm.description.trim(),
-        category: addForm.category,
+        category: addForm.category.trim(),
         amount: amountNum,
         status: addForm.status,
         added_by: user?.id || null,
@@ -279,7 +279,7 @@ function AccountantExpenses() {
     setEditingExpense(exp);
     setEditForm({
       description: exp.description || '',
-      category: exp.category || EXPENSE_CATEGORIES[0],
+      category: exp.category != null ? String(exp.category) : '',
       amount: formatAmountDisplay(String(parseAmount(exp.amount))),
       date: dateStr,
       status: exp.status === 'Paid' ? 'Paid' : 'Pending',
@@ -305,13 +305,13 @@ function AccountantExpenses() {
       return;
     }
     const amountNum = parseFloat(String(editForm.amount).replace(/,/g, ''), 10);
-    if (!editForm.description.trim() || Number.isNaN(amountNum) || amountNum <= 0) return;
+    if (!editForm.description.trim() || !editForm.category.trim() || Number.isNaN(amountNum) || amountNum <= 0) return;
     setSubmitting(true);
     try {
       const res = await updateExpense(editingExpense.id, {
         date: editForm.date,
         description: editForm.description.trim(),
-        category: editForm.category,
+        category: editForm.category.trim(),
         amount: amountNum,
         status: editForm.status,
       });
@@ -603,16 +603,15 @@ function AccountantExpenses() {
               </div>
               <div className="expenses-form-group">
                 <label htmlFor="add-category">Category</label>
-                <select
+                <input
                   id="add-category"
+                  type="text"
                   value={addForm.category}
                   onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))}
+                  placeholder="e.g. Payroll, Utilities, Inventory"
+                  required
                   className="expenses-form-input"
-                >
-                  {EXPENSE_CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+                />
               </div>
               <div className="expenses-form-group">
                 <label htmlFor="add-amount">Amount (TZS)</label>
@@ -685,16 +684,15 @@ function AccountantExpenses() {
               </div>
               <div className="expenses-form-group">
                 <label htmlFor="edit-category">Category</label>
-                <select
+                <input
                   id="edit-category"
+                  type="text"
                   value={editForm.category}
                   onChange={(e) => setEditForm((f) => ({ ...f, category: e.target.value }))}
+                  placeholder="e.g. Payroll, Utilities, Inventory"
+                  required
                   className="expenses-form-input"
-                >
-                  {EXPENSE_CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+                />
               </div>
               <div className="expenses-form-group">
                 <label htmlFor="edit-amount">Amount (TZS)</label>

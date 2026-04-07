@@ -33,7 +33,8 @@ export const apiRequest = async (endpoint, options = {}) => {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || "API request failed");
+      const msg = data.message || data.error || `Request failed (${response.status})`;
+      throw new Error(typeof msg === "string" ? msg : "API request failed");
     }
 
     console.log("✅ API Response:", data);
@@ -281,10 +282,15 @@ export const createPayment = (paymentData) => {
 };
 
 /**
- * Get all payments
+ * Get all payments. Optional query params e.g. { receivedSumFrom, receivedSumTo } for per-period amount_received_in_range (installment events).
  */
-export const getPayments = () => {
-  return apiRequest("/payments");
+export const getPayments = (queryParams = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(queryParams).forEach(([k, v]) => {
+    if (v != null && v !== "") q.append(k, String(v));
+  });
+  const qs = q.toString();
+  return apiRequest(`/payments${qs ? `?${qs}` : ""}`);
 };
 
 /**
@@ -307,13 +313,24 @@ export const deletePayment = (id) => {
 };
 
 /**
- * Update payment details (amount_received, amount_remain, payment_method) without changing status.
- * Used when cashier confirms; status remains Pending until manager approves.
+ * Update payment details (amount_received, amount_remain, payment_method, payment_type, channel columns, etc.)
+ * without changing status. Body keys omitted are left unchanged on the server (except core fields always sent).
  */
-export const updatePaymentDetails = (id, { amount_received, amount_remain, payment_method, confirmed_by_cashier_id }) => {
+export const updatePaymentDetails = (id, payload = {}) => {
   return apiRequest(`/payments/${id}/details`, {
     method: "PUT",
-    body: { amount_received, amount_remain, payment_method, confirmed_by_cashier_id }
+    body: payload
+  });
+};
+
+/**
+ * Create (or upsert) a loan row using an existing payment_id.
+ * This writes into the `loans` table without approving/rejecting the payment.
+ */
+export const createLoanFromPayment = (paymentId, status = 'Pending', overrides = {}) => {
+  return apiRequest('/loans/from-payment', {
+    method: 'POST',
+    body: { payment_id: paymentId, status, ...overrides }
   });
 };
 
